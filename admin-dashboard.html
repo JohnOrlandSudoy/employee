@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Bus Tracking</title>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .bus-icon {
+            background: #ef4444;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .bus-icon::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 8px;
+            height: 8px;
+            background: #fff;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="min-h-screen">
+        <!-- Header -->
+        <header class="bg-white shadow-sm border-b border-gray-200">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center h-16">
+                    <div class="flex items-center space-x-3">
+                        <div class="h-8 w-8 bg-blue-500 rounded-full flex items-center justify-center">
+                            <svg class="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m-6 3l6-3"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <h1 class="text-lg font-semibold text-gray-900">Admin Dashboard</h1>
+                            <p class="text-sm text-gray-600">Real-time Bus Tracking</p>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center space-x-4">
+                        <!-- Connection Status -->
+                        <div id="connectionStatus" class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-gray-100">
+                            <div id="statusDot" class="w-3 h-3 bg-red-500 rounded-full"></div>
+                            <span id="statusText" class="text-sm font-medium text-gray-700">Disconnected</span>
+                        </div>
+                        
+                        <button id="connectBtn" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors">
+                            Connect
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Map Section -->
+                <div class="lg:col-span-2">
+                    <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+                        <h2 class="text-xl font-semibold text-gray-900 mb-4">Live Bus Locations</h2>
+                        <div id="map" class="w-full h-96 rounded-xl overflow-hidden border border-gray-200"></div>
+                    </div>
+                </div>
+
+                <!-- Live Updates Section -->
+                <div class="space-y-6">
+                    <!-- Active Buses with Enhanced Data -->
+                    <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Active Buses</h3>
+                        <div id="activeBuses" class="space-y-3">
+                            <p class="text-gray-500 text-sm">No active buses</p>
+                        </div>
+                    </div>
+
+                    <!-- Live Updates -->
+                    <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Live Updates</h3>
+                        <div id="liveUpdates" class="space-y-3 max-h-64 overflow-y-auto">
+                            <p class="text-gray-500 text-sm">No updates yet</p>
+                        </div>
+                    </div>
+
+                    <!-- Enhanced Connection Info -->
+                    <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Connection Info</h3>
+                        <div class="space-y-2 text-sm">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Status:</span>
+                                <span id="connectionInfo" class="font-medium">-</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Connected Buses:</span>
+                                <span id="connectedBuses" class="font-medium">0</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Total Locations:</span>
+                                <span id="totalLocations" class="font-medium">0</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Last Update:</span>
+                                <span id="lastUpdate" class="font-medium">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Employee Details Panel -->
+                    <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Employee Details</h3>
+                        <div id="employeeDetails" class="space-y-3">
+                            <p class="text-gray-500 text-sm">No employee details available</p>
+                        </div>
+                    </div>
+
+                    <!-- Bus Statistics -->
+                    <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Bus Statistics</h3>
+                        <div id="busStatistics" class="space-y-3">
+                            <p class="text-gray-500 text-sm">No statistics available</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        class AdminDashboard {
+            constructor() {
+                this.ws = null;
+                this.map = null;
+                this.busMarkers = new Map();
+                this.activeBuses = new Map();
+                this.connectionStatus = 'disconnected';
+                this.totalLocations = 0;
+                this.employeeDetails = new Map();
+                this.busStatistics = new Map();
+                
+                this.initMap();
+                this.bindEvents();
+            }
+
+            initMap() {
+                // Initialize map centered on a default location
+                this.map = L.map('map').setView([40.7128, -74.0060], 10);
+                
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(this.map);
+            }
+
+            bindEvents() {
+                document.getElementById('connectBtn').addEventListener('click', () => {
+                    if (this.connectionStatus === 'connected') {
+                        this.disconnect();
+                    } else {
+                        this.connect();
+                    }
+                });
+
+                // Add ping button functionality
+                document.getElementById('pingBtn').addEventListener('click', () => {
+                    this.pingServer();
+                });
+            }
+
+            connect() {
+                const wsUrl = 'ws://localhost:3001';
+                
+                try {
+                    this.ws = new WebSocket(wsUrl);
+                    this.setupWebSocketHandlers();
+                    this.updateConnectionStatus('connecting');
+                } catch (error) {
+                    console.error('Failed to create WebSocket connection:', error);
+                    this.updateConnectionStatus('error');
+                }
+            }
+
+            disconnect() {
+                if (this.ws) {
+                    this.ws.close();
+                    this.ws = null;
+                }
+                this.updateConnectionStatus('disconnected');
+                this.clearBusMarkers();
+            }
+
+            setupWebSocketHandlers() {
+                this.ws.onopen = () => {
+                    console.log('Connected to WebSocket server');
+                    this.updateConnectionStatus('connected');
+                    
+                    // Send admin connection message
+                    this.sendMessage({
+                        type: 'admin_connected',
+                        data: { role: 'admin' }
+                    });
+                };
+
+                this.ws.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        this.handleMessage(message);
+                    } catch (error) {
+                        console.error('Failed to parse WebSocket message:', error);
+                    }
+                };
+
+                this.ws.onclose = () => {
+                    console.log('WebSocket connection closed');
+                    this.updateConnectionStatus('disconnected');
+                    this.clearBusMarkers();
+                };
+
+                this.ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    this.updateConnectionStatus('error');
+                };
+            }
+
+            handleMessage(message) {
+                console.log('📨 Received enhanced message:', message);
+                
+                switch (message.type) {
+                    case 'connected':
+                        this.handleConnected(message.data);
+                        break;
+                    case 'employee_connected':
+                        this.handleEmployeeConnected(message.data);
+                        break;
+                    case 'location_update':
+                        this.handleLocationUpdate(message.data);
+                        break;
+                    case 'device_location':
+                        this.handleDeviceLocation(message.data);
+                        break;
+                    case 'employee_disconnected':
+                        this.handleEmployeeDisconnected(message.data);
+                        break;
+                    case 'employee_statuses':
+                        this.handleEmployeeStatuses(message.data);
+                        break;
+                    case 'client_disconnected':
+                        this.handleClientDisconnected(message.data);
+                        break;
+                    case 'pong':
+                        this.handlePongResponse(message.data);
+                        break;
+                    default:
+                        console.log('📨 Unhandled message type:', message.type);
+                }
+            }
+
+            handleEmployeeConnected(data) {
+                const { 
+                    employeeId, 
+                    employeeName, 
+                    employeeEmail, 
+                    busId, 
+                    busNumber, 
+                    availableSeats, 
+                    totalSeats,
+                    timestamp 
+                } = data;
+                
+                // Store enhanced employee data
+                this.activeBuses.set(employeeId, {
+                    employeeId,
+                    employeeName,
+                    employeeEmail,
+                    busId,
+                    busNumber,
+                    availableSeats,
+                    totalSeats,
+                    status: 'online',
+                    lastSeen: new Date(timestamp),
+                    locationCount: 0
+                });
+                
+                // Store employee details
+                this.employeeDetails.set(employeeId, {
+                    name: employeeName,
+                    email: employeeEmail,
+                    busNumber: busNumber,
+                    connectedAt: timestamp
+                });
+                
+                // Store bus statistics
+                this.busStatistics.set(busId, {
+                    busNumber: busNumber,
+                    availableSeats: availableSeats,
+                    totalSeats: totalSeats,
+                    employeeId: employeeId,
+                    employeeName: employeeName
+                });
+                
+                this.updateActiveBuses();
+                this.updateEmployeeDetails();
+                this.updateBusStatistics();
+                this.updateConnectionInfo();
+                
+                this.addLiveUpdate(`🚌 ${employeeName} (${employeeEmail}) connected to ${busNumber} - ${availableSeats}/${totalSeats} seats available`);
+            }
+
+            handleLocationUpdate(data) {
+                const { 
+                    employeeId, 
+                    employeeName, 
+                    employeeEmail,
+                    busId, 
+                    location, 
+                    busNumber, 
+                    timestamp, 
+                    accuracy,
+                    availableSeats,
+                    totalSeats,
+                    locationNumber
+                } = data;
+                
+                // Update active bus info
+                if (this.activeBuses.has(employeeId)) {
+                    const busInfo = this.activeBuses.get(employeeId);
+                    busInfo.lastLocation = location;
+                    busInfo.lastSeen = new Date(timestamp);
+                    busInfo.busNumber = busNumber;
+                    busInfo.availableSeats = availableSeats;
+                    busInfo.totalSeats = totalSeats;
+                    busInfo.locationCount = locationNumber;
+                    busInfo.accuracy = accuracy;
+                }
+
+                // Update map marker with enhanced popup
+                this.updateBusMarker(employeeId, location, busNumber, employeeName, availableSeats, totalSeats);
+                
+                // Update live updates with rich information
+                const accuracyText = accuracy ? ` (Accuracy: ${Math.round(accuracy)}m)` : '';
+                this.addLiveUpdate(`📍 ${employeeName} on ${busNumber}: ${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}${accuracyText} - ${availableSeats}/${totalSeats} seats`);
+                
+                // Update last update time
+                document.getElementById('lastUpdate').textContent = new Date(timestamp).toLocaleTimeString();
+                
+                // Update total locations count
+                this.totalLocations++;
+                document.getElementById('totalLocations').textContent = this.totalLocations;
+                
+                // Update connected buses count
+                document.getElementById('connectedBuses').textContent = this.activeBuses.size;
+                
+                // Update other panels
+                this.updateActiveBuses();
+                this.updateBusStatistics();
+            }
+
+            handleDeviceLocation(data) {
+                const { 
+                    employeeId, 
+                    employeeName, 
+                    employeeEmail,
+                    busNumber, 
+                    location, 
+                    timestamp, 
+                    accuracy,
+                    speed,
+                    heading,
+                    availableSeats,
+                    totalSeats,
+                    locationNumber
+                } = data;
+                
+                // Update active bus info with device-specific data
+                if (this.activeBuses.has(employeeId)) {
+                    const busInfo = this.activeBuses.get(employeeId);
+                    busInfo.lastLocation = location;
+                    busInfo.lastSeen = new Date(timestamp);
+                    busInfo.busNumber = busNumber;
+                    busInfo.availableSeats = availableSeats;
+                    busInfo.totalSeats = totalSeats;
+                    busInfo.locationCount = locationNumber;
+                    busInfo.accuracy = accuracy;
+                    busInfo.speed = speed;
+                    busInfo.heading = heading;
+                }
+
+                // Update map marker with enhanced popup
+                this.updateBusMarker(employeeId, location, busNumber, employeeName, availableSeats, totalSeats);
+                
+                // Update live updates with device information
+                const accuracyText = accuracy ? ` (Accuracy: ${Math.round(accuracy)}m)` : '';
+                const speedText = speed ? ` (Speed: ${speed.toFixed(1)} m/s)` : '';
+                const headingText = heading ? ` (Heading: ${heading.toFixed(1)}°)` : '';
+                
+                this.addLiveUpdate(`📱 ${employeeName} on ${busNumber}: ${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}${accuracyText}${speedText}${headingText} - ${availableSeats}/${totalSeats} seats`);
+                
+                // Update last update time
+                document.getElementById('lastUpdate').textContent = new Date(timestamp).toLocaleTimeString();
+                
+                // Update total locations count
+                this.totalLocations++;
+                document.getElementById('totalLocations').textContent = this.totalLocations;
+                
+                // Update other panels
+                this.updateActiveBuses();
+                this.updateBusStatistics();
+            }
+
+            handleEmployeeDisconnected(data) {
+                const { clientId } = data;
+                
+                // Find and remove employee
+                for (const [employeeId, busInfo] of this.activeBuses.entries()) {
+                    if (busInfo.clientId === clientId) {
+                        this.activeBuses.delete(employeeId);
+                        this.removeBusMarker(employeeId);
+                        this.employeeDetails.delete(employeeId);
+                        break;
+                    }
+                }
+                
+                this.updateActiveBuses();
+                this.updateEmployeeDetails();
+                this.updateConnectionInfo();
+                this.addLiveUpdate(`❌ Employee disconnected`);
+            }
+
+            handleEmployeeStatuses(data) {
+                console.log('📊 Received employee statuses:', data);
+                
+                data.employees.forEach(employee => {
+                    if (!this.activeBuses.has(employee.employeeId)) {
+                        this.activeBuses.set(employee.employeeId, {
+                            employeeId: employee.employeeId,
+                            employeeName: employee.employeeName || 'Unknown',
+                            employeeEmail: employee.employeeEmail || 'Unknown',
+                            busId: employee.busId,
+                            busNumber: employee.busNumber || 'Unknown',
+                            availableSeats: employee.availableSeats || 0,
+                            totalSeats: employee.totalSeats || 0,
+                            status: employee.status || 'online',
+                            lastSeen: new Date(employee.timestamp),
+                            locationCount: employee.locationCount || 0,
+                            accuracy: employee.accuracy
+                        });
+                        
+                        // Store employee details
+                        this.employeeDetails.set(employee.employeeId, {
+                            name: employee.employeeName || 'Unknown',
+                            email: employee.employeeEmail || 'Unknown',
+                            busNumber: employee.busNumber || 'Unknown',
+                            connectedAt: employee.timestamp
+                        });
+                        
+                        // Store bus statistics
+                        if (employee.busId) {
+                            this.busStatistics.set(employee.busId, {
+                                busNumber: employee.busNumber || 'Unknown',
+                                availableSeats: employee.availableSeats || 0,
+                                totalSeats: employee.totalSeats || 0,
+                                employeeId: employee.employeeId,
+                                employeeName: employee.employeeName || 'Unknown'
+                            });
+                        }
+                    }
+                });
+                
+                this.updateActiveBuses();
+                this.updateEmployeeDetails();
+                this.updateBusStatistics();
+                this.updateConnectionInfo();
+                
+                this.addLiveUpdate(`📊 Loaded ${data.employees.length} employee statuses from server`);
+            }
+
+            updateBusMarker(employeeId, location, busNumber, employeeName, availableSeats, totalSeats) {
+                const latLng = [location.lat, location.lng];
+                
+                if (this.busMarkers.has(employeeId)) {
+                    // Update existing marker
+                    const marker = this.busMarkers.get(employeeId);
+                    marker.setLatLng(latLng);
+                    marker.getPopup().setContent(this.createEnhancedPopupContent(busNumber, employeeName, availableSeats, totalSeats));
+                } else {
+                    // Create new marker
+                    const marker = L.marker(latLng, {
+                        icon: L.divIcon({
+                            className: 'bus-icon',
+                            iconSize: [20, 20],
+                            iconAnchor: [10, 10]
+                        })
+                    }).addTo(this.map);
+                    
+                    marker.bindPopup(this.createEnhancedPopupContent(busNumber, employeeName, availableSeats, totalSeats));
+                    this.busMarkers.set(employeeId, marker);
+                }
+                
+                // Center map on first bus
+                if (this.busMarkers.size === 1) {
+                    this.map.setView(latLng, 13);
+                }
+            }
+
+            createEnhancedPopupContent(busNumber, employeeName, availableSeats, totalSeats) {
+                return `
+                    <div class="text-center min-w-[200px]">
+                        <h3 class="font-semibold text-gray-900 text-lg">🚌 ${busNumber}</h3>
+                        <p class="text-sm text-gray-600 mb-2">Driver: ${employeeName}</p>
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="text-gray-600">Available:</span>
+                            <span class="font-medium text-green-600">${availableSeats}</span>
+                        </div>
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="text-gray-600">Total:</span>
+                            <span class="font-medium text-blue-600">${totalSeats}</span>
+                        </div>
+                        <div class="mt-2 text-xs text-gray-500">
+                            Last updated: ${new Date().toLocaleTimeString()}
+                        </div>
+                    </div>
+                `;
+            }
+
+            removeBusMarker(employeeId) {
+                if (this.busMarkers.has(employeeId)) {
+                    const marker = this.busMarkers.get(employeeId);
+                    this.map.removeLayer(marker);
+                    this.busMarkers.delete(employeeId);
+                }
+            }
+
+            clearBusMarkers() {
+                this.busMarkers.forEach(marker => {
+                    this.map.removeLayer(marker);
+                });
+                this.busMarkers.clear();
+            }
+
+            updateActiveBuses() {
+                const container = document.getElementById('activeBuses');
+                
+                if (this.activeBuses.size === 0) {
+                    container.innerHTML = '<p class="text-gray-500 text-sm">No active buses</p>';
+                    return;
+                }
+                
+                container.innerHTML = Array.from(this.activeBuses.values())
+                    .map(bus => `
+                        <div class="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="font-semibold text-gray-900 text-lg">🚌 ${bus.busNumber || 'N/A'}</div>
+                                <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                            </div>
+                            <div class="space-y-1 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Driver:</span>
+                                    <span class="font-medium text-gray-900">${bus.employeeName || 'Unknown'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Email:</span>
+                                    <span class="text-gray-700">${bus.employeeEmail || 'N/A'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Seats:</span>
+                                    <span class="font-medium ${bus.availableSeats > 0 ? 'text-green-600' : 'text-red-600'}">${bus.availableSeats || 0}/${bus.totalSeats || 0}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Locations:</span>
+                                    <span class="font-medium text-blue-600">${bus.locationCount || 0}</span>
+                                </div>
+                                ${bus.accuracy ? `
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Accuracy:</span>
+                                    <span class="text-gray-700">${Math.round(bus.accuracy)}m</span>
+                                </div>
+                                ` : ''}
+                                ${bus.speed ? `
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Speed:</span>
+                                    <span class="text-gray-700">${bus.speed.toFixed(1)} m/s</span>
+                                </div>
+                                ` : ''}
+                                ${bus.heading ? `
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Heading:</span>
+                                    <span class="text-gray-700">${bus.heading.toFixed(1)}°</span>
+                                </div>
+                                ` : ''}
+                            </div>
+                            <div class="mt-2 text-xs text-gray-500 text-right">
+                                Last seen: ${bus.lastSeen.toLocaleTimeString()}
+                            </div>
+                        </div>
+                    `).join('');
+            }
+
+            addLiveUpdate(message) {
+                const container = document.getElementById('liveUpdates');
+                const timestamp = new Date().toLocaleTimeString();
+                
+                const updateElement = document.createElement('div');
+                updateElement.className = 'p-3 bg-blue-50 rounded-lg border-l-4 border-blue-500';
+                updateElement.innerHTML = `
+                    <div class="text-sm text-blue-900">${message}</div>
+                    <div class="text-xs text-blue-600 mt-1">${timestamp}</div>
+                `;
+                
+                container.insertBefore(updateElement, container.firstChild);
+                
+                // Keep only last 10 updates
+                const updates = container.children;
+                if (updates.length > 10) {
+                    container.removeChild(updates[updates.length - 1]);
+                }
+            }
+
+            updateConnectionStatus(status) {
+                this.connectionStatus = status;
+                const statusDot = document.getElementById('statusDot');
+                const statusText = document.getElementById('statusText');
+                const connectBtn = document.getElementById('connectBtn');
+                const connectionInfo = document.getElementById('connectionInfo');
+                const pingBtn = document.getElementById('pingBtn');
+                
+                switch (status) {
+                    case 'connected':
+                        statusDot.className = 'w-3 h-3 bg-green-500 rounded-full';
+                        statusText.textContent = 'Connected';
+                        connectBtn.textContent = 'Disconnect';
+                        connectBtn.className = 'bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors';
+                        connectionInfo.textContent = 'Live';
+                        // Ping button will be enabled by handleConnected method
+                        break;
+                    case 'connecting':
+                        statusDot.className = 'w-3 h-3 bg-yellow-500 rounded-full animate-pulse';
+                        statusText.textContent = 'Connecting...';
+                        connectBtn.textContent = 'Connecting...';
+                        connectBtn.disabled = true;
+                        connectionInfo.textContent = 'Establishing...';
+                        pingBtn.disabled = true;
+                        pingBtn.className = 'bg-gray-400 text-white px-4 py-2 rounded-lg ml-2 cursor-not-allowed';
+                        break;
+                    case 'disconnected':
+                        statusDot.className = 'w-3 h-3 bg-red-500 rounded-full';
+                        statusText.textContent = 'Disconnected';
+                        connectBtn.textContent = 'Connect';
+                        connectBtn.className = 'bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors';
+                        connectBtn.disabled = false;
+                        connectionInfo.textContent = 'Offline';
+                        pingBtn.disabled = true;
+                        pingBtn.className = 'bg-gray-400 text-white px-4 py-2 rounded-lg ml-2 cursor-not-allowed';
+                        break;
+                    case 'error':
+                        statusDot.className = 'w-3 h-3 bg-red-500 rounded-full';
+                        statusText.textContent = 'Error';
+                        connectBtn.textContent = 'Retry';
+                        connectBtn.className = 'bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors';
+                        connectBtn.disabled = false;
+                        connectionInfo.textContent = 'Error';
+                        pingBtn.disabled = true;
+                        pingBtn.className = 'bg-gray-400 text-white px-4 py-2 rounded-lg ml-2 cursor-not-allowed';
+                        break;
+                }
+            }
+
+            updateEmployeeDetails() {
+                const container = document.getElementById('employeeDetails');
+                
+                if (this.employeeDetails.size === 0) {
+                    container.innerHTML = '<p class="text-gray-500 text-sm">No employee details available</p>';
+                    return;
+                }
+                
+                container.innerHTML = Array.from(this.employeeDetails.entries())
+                    .map(([employeeId, details]) => `
+                        <div class="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                            <div class="font-medium text-blue-900 mb-2">👤 ${details.name}</div>
+                            <div class="space-y-1 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-blue-700">Email:</span>
+                                    <span class="text-blue-900">${details.email}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-blue-700">Bus:</span>
+                                    <span class="text-blue-900">${details.busNumber}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-blue-700">Connected:</span>
+                                    <span class="text-blue-900">${new Date(details.connectedAt).toLocaleTimeString()}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+            }
+
+            updateBusStatistics() {
+                const container = document.getElementById('busStatistics');
+                
+                if (this.busStatistics.size === 0) {
+                    container.innerHTML = '<p class="text-gray-500 text-sm">No statistics available</p>';
+                    return;
+                }
+                
+                container.innerHTML = Array.from(this.busStatistics.entries())
+                    .map(([busId, stats]) => `
+                        <div class="p-3 bg-green-50 rounded-lg border border-green-200">
+                            <div class="font-medium text-green-900 mb-2">🚌 ${stats.busNumber}</div>
+                            <div class="space-y-1 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-green-700">Driver:</span>
+                                    <span class="text-green-900">${stats.employeeName}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-green-700">Available Seats:</span>
+                                    <span class="font-medium ${stats.availableSeats > 0 ? 'text-green-600' : 'text-red-600'}">${stats.availableSeats}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-green-700">Total Seats:</span>
+                                    <span class="text-green-900">${stats.totalSeats}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-green-700">Occupancy:</span>
+                                    <span class="text-green-900">${Math.round(((stats.totalSeats - stats.availableSeats) / stats.totalSeats) * 100)}%</span>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+            }
+
+            updateConnectionInfo() {
+                document.getElementById('connectedBuses').textContent = this.activeBuses.size;
+                document.getElementById('totalLocations').textContent = this.totalLocations;
+            }
+
+            handleClientDisconnected(data) {
+                const { clientId, totalClients } = data;
+                this.addLiveUpdate(`🔌 Client ${clientId} disconnected. Total clients: ${totalClients}`);
+                this.updateConnectionInfo();
+            }
+
+            handleConnected(data) {
+                console.log('✅ Connected to enhanced server:', data.message);
+                this.addLiveUpdate(`✅ ${data.message}`);
+                
+                // Enable ping button when connected
+                const pingBtn = document.getElementById('pingBtn');
+                pingBtn.disabled = false;
+                pingBtn.className = 'bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors ml-2';
+                
+                // Show server features
+                if (data.features && data.features.length > 0) {
+                    this.addLiveUpdate(`🚀 Server features: ${data.features.join(', ')}`);
+                }
+            }
+
+            pingServer() {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.sendMessage({
+                        type: 'ping',
+                        data: {}
+                    });
+                    this.addLiveUpdate('🏓 Pinging server...');
+                }
+            }
+
+            handlePongResponse(data) {
+                const { serverStatus } = data;
+                this.addLiveUpdate(`🏓 Server ping response - Clients: ${serverStatus.totalClients}, API Status: ${serverStatus.apiStatus}`);
+            }
+
+            sendMessage(message) {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify(message));
+                }
+            }
+        }
+
+        // Initialize dashboard when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new AdminDashboard();
+        });
+    </script>
+</body>
+</html>

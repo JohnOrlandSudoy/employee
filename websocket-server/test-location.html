@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Location Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 p-8">
+    <div class="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
+        <h1 class="text-2xl font-bold text-gray-900 mb-6">📍 Device Location Test</h1>
+        
+        <!-- Connection Status -->
+        <div class="mb-6">
+            <div class="flex items-center space-x-2 mb-2">
+                <div id="statusDot" class="w-3 h-3 bg-red-500 rounded-full"></div>
+                <span id="statusText" class="text-sm font-medium">Disconnected</span>
+            </div>
+            <button id="connectBtn" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors">
+                Connect to Server
+            </button>
+        </div>
+        
+        <!-- Location Controls -->
+        <div class="mb-6">
+            <button id="getLocationBtn" class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors mb-3 w-full" disabled>
+                Get My Location
+            </button>
+            <button id="sendLocationBtn" class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors w-full" disabled>
+                Send Location to Server
+            </button>
+        </div>
+        
+        <!-- Location Display -->
+        <div class="mb-6">
+            <h3 class="text-lg font-semibold text-gray-900 mb-3">Current Location</h3>
+            <div id="locationInfo" class="text-sm text-gray-600">
+                <p>No location data yet</p>
+            </div>
+        </div>
+        
+        <!-- Messages -->
+        <div class="mb-6">
+            <h3 class="text-lg font-semibold text-gray-900 mb-3">Server Messages</h3>
+            <div id="messages" class="text-sm text-gray-600 max-h-32 overflow-y-auto">
+                <p>No messages yet</p>
+            </div>
+        </div>
+        
+        <!-- Test Controls -->
+        <div class="mb-6">
+            <h3 class="text-lg font-semibold text-gray-900 mb-3">Test Controls</h3>
+            <button id="pingBtn" class="bg-yellow-500 text-white px-3 py-2 rounded-lg hover:bg-yellow-600 transition-colors mr-2" disabled>
+                Ping Server
+            </button>
+            <button id="requestLocationBtn" class="bg-indigo-500 text-white px-3 py-2 rounded-lg hover:bg-indigo-600 transition-colors" disabled>
+                Request Location
+            </button>
+        </div>
+    </div>
+
+    <script>
+        class LocationTest {
+            constructor() {
+                this.ws = null;
+                this.currentLocation = null;
+                this.isConnected = false;
+                
+                this.bindEvents();
+            }
+            
+            bindEvents() {
+                document.getElementById('connectBtn').addEventListener('click', () => {
+                    if (this.isConnected) {
+                        this.disconnect();
+                    } else {
+                        this.connect();
+                    }
+                });
+                
+                document.getElementById('getLocationBtn').addEventListener('click', () => {
+                    this.getCurrentLocation();
+                });
+                
+                document.getElementById('sendLocationBtn').addEventListener('click', () => {
+                    this.sendLocationToServer();
+                });
+                
+                document.getElementById('pingBtn').addEventListener('click', () => {
+                    this.pingServer();
+                });
+                
+                document.getElementById('requestLocationBtn').addEventListener('click', () => {
+                    this.requestLocationFromServer();
+                });
+            }
+            
+            connect() {
+                const wsUrl = 'ws://localhost:3001';
+                
+                try {
+                    this.ws = new WebSocket(wsUrl);
+                    this.setupWebSocketHandlers();
+                    this.updateStatus('connecting');
+                } catch (error) {
+                    console.error('Failed to create WebSocket connection:', error);
+                    this.updateStatus('error');
+                }
+            }
+            
+            disconnect() {
+                if (this.ws) {
+                    this.ws.close();
+                    this.ws = null;
+                }
+                this.updateStatus('disconnected');
+            }
+            
+            setupWebSocketHandlers() {
+                this.ws.onopen = () => {
+                    console.log('Connected to WebSocket server');
+                    this.isConnected = true;
+                    this.updateStatus('connected');
+                    this.addMessage('✅ Connected to server');
+                };
+                
+                this.ws.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        this.handleMessage(message);
+                    } catch (error) {
+                        console.error('Failed to parse WebSocket message:', error);
+                    }
+                };
+                
+                this.ws.onclose = () => {
+                    console.log('WebSocket connection closed');
+                    this.isConnected = false;
+                    this.updateStatus('disconnected');
+                    this.addMessage('❌ Disconnected from server');
+                };
+                
+                this.ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    this.updateStatus('error');
+                    this.addMessage('❌ WebSocket error');
+                };
+            }
+            
+            handleMessage(message) {
+                console.log('Received message:', message);
+                
+                switch (message.type) {
+                    case 'connected':
+                        this.addMessage(`✅ ${message.data.message}`);
+                        break;
+                    case 'location_request':
+                        this.addMessage(`📍 ${message.data.message}`);
+                        break;
+                    case 'location_confirmed':
+                        this.addMessage(`✅ ${message.data.message}`);
+                        break;
+                    case 'location_broadcast':
+                        this.addMessage(`📡 Location from client ${message.data.clientId}: ${message.data.location.lat}, ${message.data.location.lng}`);
+                        break;
+                    case 'pong':
+                        this.addMessage(`🏓 ${message.data.message}`);
+                        break;
+                    default:
+                        this.addMessage(`📨 Unknown message: ${message.type}`);
+                }
+            }
+            
+            getCurrentLocation() {
+                if (!navigator.geolocation) {
+                    this.addMessage('❌ Geolocation not supported');
+                    return;
+                }
+                
+                this.addMessage('📍 Getting current location...');
+                
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const { latitude, longitude, accuracy } = position.coords;
+                        this.currentLocation = { lat: latitude, lng: longitude };
+                        
+                        this.displayLocation(latitude, longitude, accuracy);
+                        this.addMessage(`✅ Location obtained: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+                        
+                        // Enable send button
+                        document.getElementById('sendLocationBtn').disabled = false;
+                    },
+                    (error) => {
+                        this.addMessage(`❌ Location error: ${error.message}`);
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 10000,
+                        maximumAge: 30000
+                    }
+                );
+            }
+            
+            displayLocation(lat, lng, accuracy) {
+                const locationInfo = document.getElementById('locationInfo');
+                locationInfo.innerHTML = `
+                    <div class="space-y-2">
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Latitude:</span>
+                            <span class="font-medium">${lat.toFixed(6)}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Longitude:</span>
+                            <span class="font-medium">${lng.toFixed(6)}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Accuracy:</span>
+                            <span class="font-medium">${accuracy ? accuracy.toFixed(1) + 'm' : 'N/A'}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Time:</span>
+                            <span class="font-medium">${new Date().toLocaleTimeString()}</span>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            sendLocationToServer() {
+                if (!this.currentLocation || !this.isConnected) {
+                    this.addMessage('❌ No location or not connected');
+                    return;
+                }
+                
+                const locationData = {
+                    type: 'location_update',
+                    data: {
+                        location: this.currentLocation,
+                        timestamp: new Date().toISOString()
+                    }
+                };
+                
+                this.ws.send(JSON.stringify(locationData));
+                this.addMessage('📤 Location sent to server');
+            }
+            
+            pingServer() {
+                if (!this.isConnected) {
+                    this.addMessage('❌ Not connected');
+                    return;
+                }
+                
+                this.ws.send(JSON.stringify({
+                    type: 'ping',
+                    data: {}
+                }));
+                
+                this.addMessage('🏓 Pinging server...');
+            }
+            
+            requestLocationFromServer() {
+                if (!this.isConnected) {
+                    this.addMessage('❌ Not connected');
+                    return;
+                }
+                
+                this.ws.send(JSON.stringify({
+                    type: 'get_location',
+                    data: {}
+                }));
+                
+                this.addMessage('📤 Location request sent to server');
+            }
+            
+            updateStatus(status) {
+                const statusDot = document.getElementById('statusDot');
+                const statusText = document.getElementById('statusText');
+                const connectBtn = document.getElementById('connectBtn');
+                const getLocationBtn = document.getElementById('getLocationBtn');
+                const pingBtn = document.getElementById('pingBtn');
+                const requestLocationBtn = document.getElementById('requestLocationBtn');
+                
+                switch (status) {
+                    case 'connected':
+                        statusDot.className = 'w-3 h-3 bg-green-500 rounded-full';
+                        statusText.textContent = 'Connected';
+                        connectBtn.textContent = 'Disconnect';
+                        connectBtn.className = 'bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors';
+                        getLocationBtn.disabled = false;
+                        pingBtn.disabled = false;
+                        requestLocationBtn.disabled = false;
+                        break;
+                    case 'connecting':
+                        statusDot.className = 'w-3 h-3 bg-yellow-500 rounded-full animate-pulse';
+                        statusText.textContent = 'Connecting...';
+                        connectBtn.textContent = 'Connecting...';
+                        connectBtn.disabled = true;
+                        break;
+                    case 'disconnected':
+                        statusDot.className = 'w-3 h-3 bg-red-500 rounded-full';
+                        statusText.textContent = 'Disconnected';
+                        connectBtn.textContent = 'Connect to Server';
+                        connectBtn.className = 'bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors';
+                        connectBtn.disabled = false;
+                        getLocationBtn.disabled = true;
+                        pingBtn.disabled = true;
+                        requestLocationBtn.disabled = true;
+                        break;
+                    case 'error':
+                        statusDot.className = 'w-3 h-3 bg-red-500 rounded-full';
+                        statusText.textContent = 'Error';
+                        connectBtn.textContent = 'Retry';
+                        connectBtn.className = 'bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors';
+                        connectBtn.disabled = false;
+                        break;
+                }
+            }
+            
+            addMessage(message) {
+                const messagesContainer = document.getElementById('messages');
+                const messageElement = document.createElement('div');
+                messageElement.className = 'mb-1 p-2 bg-gray-100 rounded';
+                messageElement.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                
+                messagesContainer.insertBefore(messageElement, messagesContainer.firstChild);
+                
+                // Keep only last 10 messages
+                const messages = messagesContainer.children;
+                if (messages.length > 10) {
+                    messagesContainer.removeChild(messages[messages.length - 1]);
+                }
+            }
+        }
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new LocationTest();
+        });
+    </script>
+</body>
+</html>

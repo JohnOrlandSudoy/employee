@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, Users, Plus, Minus, AlertTriangle, LogOut, Bus } from 'lucide-react';
+import { Bell, Users, Plus, Minus, AlertTriangle, LogOut, Bus, Wifi, WifiOff } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../services/api';
+import { websocketService } from '../services/websocket';
 import { MapComponent } from '../components/Map';
 import { NotificationModal } from '../components/NotificationModal';
 import { ReportModal } from '../components/ReportModal';
@@ -17,16 +18,18 @@ export const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [watchId, setWatchId] = useState<number | null>(null);
   const [successMessage, setSuccessMessage] = useState('');
+  const [wsStatus, setWsStatus] = useState<'connected' | 'disconnected' | 'connecting'>('disconnected');
 
   useEffect(() => {
     loadBusData();
     loadNotifications();
-    startLocationTracking();
+    // Don't start location tracking here - wait for WebSocket connection
 
     return () => {
       if (watchId) {
         navigator.geolocation.clearWatch(watchId);
       }
+      websocketService.disconnect();
     };
   }, []);
 
@@ -44,6 +47,11 @@ export const Dashboard: React.FC = () => {
         passengers: busData.total_seats - busData.available_seats
       });
       setBus(busData);
+      
+      // Connect to WebSocket after bus data is loaded
+      if (busData.id && employee.id) {
+        connectWebSocket(employee.id, busData.id);
+      }
     } catch (error) {
       console.error('Failed to load bus data:', error);
     } finally {
@@ -60,23 +68,114 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const connectWebSocket = (employeeId: string, busId: string) => {
+    setWsStatus('connecting');
+    
+    websocketService.on('connected', () => {
+      setWsStatus('connected');
+      console.log('WebSocket connected for employee:', employeeId, 'bus:', busId);
+      
+      // Start location tracking only after WebSocket is connected
+      console.log('🚀 Starting location tracking now that WebSocket is connected');
+      startLocationTracking();
+    });
+
+    websocketService.on('disconnected', () => {
+      setWsStatus('disconnected');
+      console.log('❌ WebSocket disconnected - location tracking may be affected');
+    });
+
+    websocketService.on('error', (error: any) => {
+      setWsStatus('disconnected');
+      console.error('WebSocket error:', error);
+    });
+
+    websocketService.connect(employeeId, busId);
+  };
+
   const startLocationTracking = () => {
+    console.log('📍 Starting location tracking...');
+    console.log('📍 Current bus data:', bus);
+    console.log('📍 Current WebSocket status:', wsStatus);
+    
     if (!navigator.geolocation) {
       console.error('Geolocation is not supported by this browser.');
       return;
     }
 
+    if (!bus) {
+      console.warn('⚠️ Bus data not available yet, waiting...');
+      // Retry in 2 seconds
+      setTimeout(() => {
+        console.log('🔄 Retrying location tracking...');
+        startLocationTracking();
+      }, 2000);
+      return;
+    }
+
+    if (wsStatus !== 'connected') {
+      console.warn('⚠️ WebSocket not connected yet, waiting...');
+      // Retry in 2 seconds
+      setTimeout(() => {
+        console.log('🔄 Retrying location tracking...');
+        startLocationTracking();
+      }, 2000);
+      return;
+    }
+
+    console.log('✅ All conditions met, starting GPS tracking...');
     const id = navigator.geolocation.watchPosition(
       async (position) => {
-        const { latitude, longitude } = position.coords;
+        const { latitude, longitude, accuracy, speed, heading } = position.coords;
         setCurrentLocation([latitude, longitude]);
         
-        // Send location to backend
+        // Get device information
+        const deviceInfo = {
+          deviceType: navigator.userAgent.includes('Mobile') ? 'mobile' : 'desktop',
+          userAgent: navigator.userAgent,
+          platform: navigator.platform,
+          language: navigator.language
+        };
+        
+        // Send location to backend via API
         try {
           await apiClient.updateLocation(latitude, longitude);
         } catch (error) {
-          console.error('Failed to update location:', error);
+          console.error('Failed to update location via API:', error);
         }
+        
+        // Send enhanced location to admin via WebSocket
+        if (bus && wsStatus === 'connected') {
+          console.log('📡 Sending location via WebSocket...');
+          
+          // Send device-specific location with accuracy
+          websocketService.sendDeviceLocation(
+            { lat: latitude, lng: longitude },
+            deviceInfo,
+            accuracy || undefined,
+            speed || undefined,
+            heading || undefined
+          );
+          
+          // Also send standard location update
+          websocketService.sendLocationUpdate(
+            { lat: latitude, lng: longitude },
+            bus.bus_number,
+            accuracy
+          );
+          
+          console.log('✅ Location sent successfully via WebSocket');
+        } else {
+          console.warn('⚠️ Cannot send location: bus=', !!bus, 'wsStatus=', wsStatus);
+        }
+        
+        console.log('📍 Location sent:', {
+          lat: latitude,
+          lng: longitude,
+          accuracy: `${accuracy} meters`,
+          speed: speed ? `${speed} m/s` : 'N/A',
+          heading: heading ? `${heading}°` : 'N/A'
+        });
       },
       (error) => {
         console.error('Error getting location:', error);
@@ -84,7 +183,7 @@ export const Dashboard: React.FC = () => {
       {
         enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 60000,
+        maximumAge: 30000, // Reduced to 30 seconds for more frequent updates
       }
     );
 
@@ -129,7 +228,7 @@ export const Dashboard: React.FC = () => {
       await apiClient.submitReport(
         employee.id,
         bus.id,
-        report.type,
+        report.type as 'maintenance' | 'traffic' | 'passenger' | 'other',
         report.description
       );
       setSuccessMessage('Report submitted successfully!');
@@ -170,6 +269,24 @@ export const Dashboard: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-4">
+              {/* WebSocket Status */}
+              <div className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-gray-50">
+                {wsStatus === 'connected' ? (
+                  <Wifi className="h-4 w-4 text-green-500" />
+                ) : wsStatus === 'connecting' ? (
+                  <div className="h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <WifiOff className="h-4 w-4 text-red-500" />
+                )}
+                <span className={`text-sm font-medium ${
+                  wsStatus === 'connected' ? 'text-green-600' : 
+                  wsStatus === 'connecting' ? 'text-blue-600' : 'text-red-600'
+                }`}>
+                  {wsStatus === 'connected' ? 'Live' : 
+                   wsStatus === 'connecting' ? 'Connecting...' : 'Offline'}
+                </span>
+              </div>
+
               <button
                 onClick={() => setShowNotifications(true)}
                 className="relative p-2 text-gray-600 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-colors"
@@ -205,7 +322,7 @@ export const Dashboard: React.FC = () => {
           <div className="lg:col-span-2">
             <div className="bg-white rounded-xl shadow-lg p-6 border border-rose-100">
               <h2 className="text-xl font-semibold text-gray-900 mb-4">Live Route Map</h2>
-              <MapComponent bus={bus} currentLocation={currentLocation} />
+              <MapComponent bus={bus} currentLocation={currentLocation} wsStatus={wsStatus} />
             </div>
           </div>
 

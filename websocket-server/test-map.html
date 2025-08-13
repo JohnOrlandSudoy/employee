@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Map Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body class="bg-gray-50 p-8">
+    <div class="max-w-6xl mx-auto">
+        <h1 class="text-3xl font-bold text-gray-900 mb-6">🚌 Enhanced Bus Map Test</h1>
+        
+        <!-- Status Bar -->
+        <div class="bg-white rounded-lg shadow-lg p-4 mb-6">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center space-x-2">
+                        <div id="locationStatus" class="w-3 h-3 bg-red-500 rounded-full"></div>
+                        <span id="locationStatusText" class="text-sm font-medium">Location: Disabled</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <div id="trackingStatus" class="w-3 h-3 bg-red-500 rounded-full"></div>
+                        <span id="trackingStatusText" class="text-sm font-medium">Tracking: Stopped</span>
+                    </div>
+                </div>
+                <div class="flex space-x-2">
+                    <button id="getLocationBtn" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors">
+                        📍 Get Location
+                    </button>
+                    <button id="startTrackingBtn" class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                        ▶️ Start Tracking
+                    </button>
+                    <button id="stopTrackingBtn" class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors" disabled>
+                        ⏹️ Stop Tracking
+                    </button>
+                    <button id="clearHistoryBtn" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition-colors">
+                        🗑️ Clear History
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Map Container -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Map -->
+            <div class="lg:col-span-2">
+                <div class="bg-white rounded-lg shadow-lg p-4">
+                    <h2 class="text-xl font-semibold text-gray-900 mb-4">Live Bus Location Map</h2>
+                    <div id="map" class="w-full h-96 rounded-lg border border-gray-200"></div>
+                </div>
+            </div>
+
+            <!-- Location Info Panel -->
+            <div class="space-y-6">
+                <!-- Current Location -->
+                <div class="bg-white rounded-lg shadow-lg p-4">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-3">📍 Current Location</h3>
+                    <div id="currentLocationInfo" class="text-sm text-gray-600 space-y-2">
+                        <p>No location data yet</p>
+                    </div>
+                </div>
+
+                <!-- Location History -->
+                <div class="bg-white rounded-lg shadow-lg p-4">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-3">📚 Location History</h3>
+                    <div id="locationHistory" class="text-sm text-gray-600 space-y-2 max-h-48 overflow-y-auto">
+                        <p>No history yet</p>
+                    </div>
+                </div>
+
+                <!-- Map Controls -->
+                <div class="bg-white rounded-lg shadow-lg p-4">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-3">🎮 Map Controls</h3>
+                    <div class="space-y-2">
+                        <button id="centerMapBtn" class="w-full bg-indigo-500 text-white px-3 py-2 rounded text-sm hover:bg-indigo-600 transition-colors">
+                            🎯 Center on Location
+                        </button>
+                        <button id="zoomInBtn" class="w-full bg-purple-500 text-white px-3 py-2 rounded text-sm hover:bg-purple-600 transition-colors">
+                            🔍 Zoom In
+                        </button>
+                        <button id="zoomOutBtn" class="w-full bg-purple-500 text-white px-3 py-2 rounded text-sm hover:bg-purple-600 transition-colors">
+                            🔍 Zoom Out
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class EnhancedMapTest {
+            constructor() {
+                this.map = null;
+                this.currentLocation = null;
+                this.locationAccuracy = null;
+                this.locationTimestamp = null;
+                this.isTracking = false;
+                this.watchId = null;
+                this.locationHistory = [];
+                this.currentMarker = null;
+                this.historyMarkers = [];
+                this.historyPolyline = null;
+                
+                this.initMap();
+                this.bindEvents();
+            }
+            
+            initMap() {
+                // Initialize map centered on a default location
+                this.map = L.map('map').setView([40.7128, -74.0060], 13);
+                
+                // Add OpenStreetMap tiles
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(this.map);
+                
+                console.log('🗺️ Map initialized');
+            }
+            
+            bindEvents() {
+                document.getElementById('getLocationBtn').addEventListener('click', () => {
+                    this.getCurrentLocation();
+                });
+                
+                document.getElementById('startTrackingBtn').addEventListener('click', () => {
+                    this.startLocationTracking();
+                });
+                
+                document.getElementById('stopTrackingBtn').addEventListener('click', () => {
+                    this.stopLocationTracking();
+                });
+                
+                document.getElementById('clearHistoryBtn').addEventListener('click', () => {
+                    this.clearLocationHistory();
+                });
+                
+                document.getElementById('centerMapBtn').addEventListener('click', () => {
+                    this.centerMapOnLocation();
+                });
+                
+                document.getElementById('zoomInBtn').addEventListener('click', () => {
+                    this.map.zoomIn();
+                });
+                
+                document.getElementById('zoomOutBtn').addEventListener('click', () => {
+                    this.map.zoomOut();
+                });
+            }
+            
+            getCurrentLocation() {
+                if (!navigator.geolocation) {
+                    alert('Geolocation is not supported by this browser.');
+                    return;
+                }
+                
+                this.updateLocationStatus('getting');
+                
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const { latitude, longitude, accuracy } = position.coords;
+                        this.currentLocation = [latitude, longitude];
+                        this.locationAccuracy = accuracy;
+                        this.locationTimestamp = new Date().toLocaleTimeString();
+                        
+                        this.updateMap();
+                        this.updateLocationInfo();
+                        this.updateLocationStatus('enabled');
+                        
+                        console.log('📍 Location obtained:', { lat: latitude, lng: longitude, accuracy });
+                    },
+                    (error) => {
+                        console.error('Location error:', error);
+                        alert(`Error getting location: ${error.message}`);
+                        this.updateLocationStatus('error');
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 10000,
+                        maximumAge: 30000
+                    }
+                );
+            }
+            
+            startLocationTracking() {
+                if (!navigator.geolocation) {
+                    alert('Geolocation is not supported by this browser.');
+                    return;
+                }
+                
+                if (this.isTracking) return;
+                
+                this.isTracking = true;
+                this.updateTrackingStatus('active');
+                
+                this.watchId = navigator.geolocation.watchPosition(
+                    (position) => {
+                        const { latitude, longitude, accuracy } = position.coords;
+                        this.currentLocation = [latitude, longitude];
+                        this.locationAccuracy = accuracy;
+                        this.locationTimestamp = new Date().toLocaleTimeString();
+                        
+                        // Add to history
+                        this.addToHistory(latitude, longitude);
+                        
+                        this.updateMap();
+                        this.updateLocationInfo();
+                        this.updateLocationHistory();
+                        
+                        console.log('📍 Location update:', { lat: latitude, lng: longitude, accuracy });
+                    },
+                    (error) => {
+                        console.error('Location tracking error:', error);
+                        this.stopLocationTracking();
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 10000,
+                        maximumAge: 30000
+                    }
+                );
+                
+                console.log('🚀 Location tracking started');
+            }
+            
+            stopLocationTracking() {
+                if (this.watchId) {
+                    navigator.geolocation.clearWatch(this.watchId);
+                    this.watchId = null;
+                }
+                
+                this.isTracking = false;
+                this.updateTrackingStatus('stopped');
+                console.log('⏹️ Location tracking stopped');
+            }
+            
+            addToHistory(lat, lng) {
+                const locationData = {
+                    lat: lat,
+                    lng: lng,
+                    timestamp: new Date().toISOString()
+                };
+                
+                this.locationHistory.unshift(locationData);
+                
+                // Keep only last 20 locations
+                if (this.locationHistory.length > 20) {
+                    this.locationHistory = this.locationHistory.slice(0, 20);
+                }
+            }
+            
+            updateMap() {
+                if (!this.currentLocation) return;
+                
+                // Remove old current location marker
+                if (this.currentMarker) {
+                    this.map.removeLayer(this.currentMarker);
+                }
+                
+                // Add new current location marker
+                this.currentMarker = L.marker(this.currentLocation, {
+                    icon: L.divIcon({
+                        className: 'custom-div-icon',
+                        html: '<div style="background-color: #10AA64; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.3);"></div>',
+                        iconSize: [24, 24],
+                        iconAnchor: [12, 12]
+                    })
+                }).addTo(this.map);
+                
+                // Add popup to current location
+                this.currentMarker.bindPopup(`
+                    <div class="text-center">
+                        <h3 class="font-semibold text-gray-900">📍 Your Location</h3>
+                        <p class="text-sm text-gray-600">Real-time GPS</p>
+                        ${this.locationAccuracy ? `<p class="text-xs text-gray-500 mt-1">Accuracy: ${this.locationAccuracy.toFixed(1)}m</p>` : ''}
+                        ${this.locationTimestamp ? `<p class="text-xs text-gray-500">Updated: ${this.locationTimestamp}</p>` : ''}
+                    </div>
+                `);
+                
+                // Update history trail
+                this.updateHistoryTrail();
+                
+                // Center map on current location
+                this.map.setView(this.currentLocation, this.map.getZoom());
+            }
+            
+            updateHistoryTrail() {
+                // Remove old history elements
+                this.historyMarkers.forEach(marker => this.map.removeLayer(marker));
+                this.historyMarkers = [];
+                
+                if (this.historyPolyline) {
+                    this.map.removeLayer(this.historyPolyline);
+                }
+                
+                if (this.locationHistory.length < 2) return;
+                
+                // Create polyline for history trail
+                const positions = this.locationHistory.map(loc => [loc.lat, loc.lng]);
+                this.historyPolyline = L.polyline(positions, {
+                    color: '#10AA64',
+                    weight: 3,
+                    opacity: 0.6,
+                    dashArray: '5, 5'
+                }).addTo(this.map);
+                
+                // Add history markers (skip first one as it's current location)
+                this.locationHistory.slice(1).forEach((location, index) => {
+                    const marker = L.marker([location.lat, location.lng], {
+                        icon: L.divIcon({
+                            className: 'custom-div-icon',
+                            html: `<div style="background-color: #10AA64; opacity: 0.6; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white;"></div>`,
+                            iconSize: [12, 12],
+                            iconAnchor: [6, 6]
+                        })
+                    }).addTo(this.map);
+                    
+                    marker.bindPopup(`
+                        <div class="text-center">
+                            <h3 class="font-semibold text-gray-900 text-xs">📍 Location ${this.locationHistory.length - index}</h3>
+                            <p class="text-xs text-gray-600">${new Date(location.timestamp).toLocaleTimeString()}</p>
+                        </div>
+                    `);
+                    
+                    this.historyMarkers.push(marker);
+                });
+            }
+            
+            updateLocationInfo() {
+                const container = document.getElementById('currentLocationInfo');
+                
+                if (!this.currentLocation) {
+                    container.innerHTML = '<p>No location data yet</p>';
+                    return;
+                }
+                
+                container.innerHTML = `
+                    <div class="space-y-2">
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Latitude:</span>
+                            <span class="font-medium">${this.currentLocation[0].toFixed(6)}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Longitude:</span>
+                            <span class="font-medium">${this.currentLocation[1].toFixed(6)}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Accuracy:</span>
+                            <span class="font-medium">${this.locationAccuracy ? this.locationAccuracy.toFixed(1) + 'm' : 'N/A'}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Time:</span>
+                            <span class="font-medium">${this.locationTimestamp || 'N/A'}</span>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            updateLocationHistory() {
+                const container = document.getElementById('locationHistory');
+                
+                if (this.locationHistory.length === 0) {
+                    container.innerHTML = '<p>No history yet</p>';
+                    return;
+                }
+                
+                const historyHtml = this.locationHistory.map((location, index) => `
+                    <div class="flex justify-between items-center p-2 bg-gray-50 rounded">
+                        <span class="text-xs text-gray-600">${index + 1}. ${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}</span>
+                        <span class="text-xs text-gray-500">${new Date(location.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                `).join('');
+                
+                container.innerHTML = historyHtml;
+            }
+            
+            clearLocationHistory() {
+                this.locationHistory = [];
+                this.updateLocationHistory();
+                this.updateHistoryTrail();
+                console.log('🗑️ Location history cleared');
+            }
+            
+            centerMapOnLocation() {
+                if (this.currentLocation) {
+                    this.map.setView(this.currentLocation, this.map.getZoom());
+                    console.log('🎯 Map centered on current location');
+                } else {
+                    alert('No location data available');
+                }
+            }
+            
+            updateLocationStatus(status) {
+                const statusDot = document.getElementById('locationStatus');
+                const statusText = document.getElementById('locationStatusText');
+                
+                switch (status) {
+                    case 'enabled':
+                        statusDot.className = 'w-3 h-3 bg-green-500 rounded-full';
+                        statusText.textContent = 'Location: Enabled';
+                        break;
+                    case 'getting':
+                        statusDot.className = 'w-3 h-3 bg-yellow-500 rounded-full animate-pulse';
+                        statusText.textContent = 'Location: Getting...';
+                        break;
+                    case 'error':
+                        statusDot.className = 'w-3 h-3 bg-red-500 rounded-full';
+                        statusText.textContent = 'Location: Error';
+                        break;
+                    default:
+                        statusDot.className = 'w-3 h-3 bg-red-500 rounded-full';
+                        statusText.textContent = 'Location: Disabled';
+                }
+            }
+            
+            updateTrackingStatus(status) {
+                const statusDot = document.getElementById('trackingStatus');
+                const statusText = document.getElementById('trackingStatusText');
+                const startBtn = document.getElementById('startTrackingBtn');
+                const stopBtn = document.getElementById('stopTrackingBtn');
+                
+                switch (status) {
+                    case 'active':
+                        statusDot.className = 'w-3 h-3 bg-green-500 rounded-full animate-pulse';
+                        statusText.textContent = 'Tracking: Active';
+                        startBtn.disabled = true;
+                        stopBtn.disabled = false;
+                        break;
+                    case 'stopped':
+                        statusDot.className = 'w-3 h-3 bg-red-500 rounded-full';
+                        statusText.textContent = 'Tracking: Stopped';
+                        startBtn.disabled = false;
+                        stopBtn.disabled = true;
+                        break;
+                    default:
+                        statusDot.className = 'w-3 h-3 bg-red-500 rounded-full';
+                        statusText.textContent = 'Tracking: Stopped';
+                        startBtn.disabled = false;
+                        stopBtn.disabled = true;
+                }
+            }
+        }
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new EnhancedMapTest();
+        });
+    </script>
+</body>
+</html>

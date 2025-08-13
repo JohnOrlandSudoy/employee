@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "websocket": "cd websocket-server && npm start",
+    "start:all": "concurrently \"npm run websocket\" \"npm run dev\""
   },
   "dependencies": {
     "@types/react-leaflet": "^2.8.3",
