@@ -6,7 +6,7 @@ class ApiClient {
 
   constructor() {
     this.client = axios.create({
-      baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000',
+      baseURL: import.meta.env.VITE_API_BASE_URL || 'https://backendbus-sumt.onrender.com',
       headers: {
         'Content-Type': 'application/json',
       },
