@@ -8,14 +8,18 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "websocket": "cd websocket-server && npm start",
-    "start:all": "concurrently \"npm run websocket\" \"npm run dev\""
+    "server": "node server.js",
+    "start:all": "concurrently \"npm run server\" \"npm run dev\""
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
     "@types/react-leaflet": "^2.8.3",
     "@types/react-router-dom": "^5.3.3",
     "axios": "^1.11.0",
     "caniuse-lite": "^1.0.30001731",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.344.0",
     "react": "^18.3.1",
@@ -34,6 +38,7 @@
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.11",
     "globals": "^15.9.0",
+    "concurrently": "^8.2.2",
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.5.3",

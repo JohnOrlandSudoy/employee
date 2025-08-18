@@ -60,8 +60,8 @@ class ApiClient {
     return response.data.bus;
   }
 
-  async updateLocation(lat: number, lng: number): Promise<void> {
-    await this.client.put('/api/employee/location', { lat, lng });
+  async updateLocation(lat: number, lng: number, employeeId?: string, busId?: string): Promise<void> {
+    await this.client.put('/api/employee/location', { lat, lng, employeeId, busId });
   }
 
   async updatePassengerCount(busId: string, action: 'add' | 'remove'): Promise<void> {

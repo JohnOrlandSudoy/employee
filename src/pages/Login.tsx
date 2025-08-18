@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogIn, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,6 +12,15 @@ export const Login: React.FC = () => {
   
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  // If already authenticated (employee in localStorage), redirect to dashboard
+  useEffect(() => {
+    const savedEmployee = localStorage.getItem('employee_data');
+    const savedToken = localStorage.getItem('auth_token');
+    if (savedEmployee && savedToken) {
+      navigate('/', { replace: true });
+    }
+  }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

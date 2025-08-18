@@ -12,12 +12,12 @@ Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-// Custom bus icon
+// Custom bus icon (from public/bus-icon.png)
 const busIcon = new Icon({
-  iconUrl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3QgeD0iNCIgeT0iOCIgd2lkdGg9IjI0IiBoZWlnaHQ9IjE2IiByeD0iNCIgZmlsbD0iI0Y0M0Y1RSIvPgo8cmVjdCB4PSI2IiB5PSIxMCIgd2lkdGg9IjIwIiBoZWlnaHQ9IjEyIiByeD0iMiIgZmlsbD0id2hpdGUiLz4KPGNpcmNsZSBjeD0iMTAiIGN5PSIyNiIgcj0iMiIgZmlsbD0iIzM3NDE1MSIvPgo8Y2lyY2xlIGN4PSIyMiIgY3k9IjI2IiByPSIyIiBmaWxsPSIjMzc0MTUxIi8+Cjwvc3ZnPgo=',
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-  popupAnchor: [0, -32],
+  iconUrl: '/bus-icon.png',
+  iconSize: [40, 40],
+  iconAnchor: [20, 40],
+  popupAnchor: [0, -40],
 });
 
 // Terminal icon
@@ -39,7 +39,6 @@ const currentLocationBusIcon = new Icon({
 interface MapProps {
   bus: Bus | null;
   currentLocation: [number, number] | null;
-  wsStatus?: 'connected' | 'disconnected' | 'connecting';
 }
 
 const MapUpdater: React.FC<{ center: LatLngExpression }> = ({ center }) => {
@@ -52,16 +51,20 @@ const MapUpdater: React.FC<{ center: LatLngExpression }> = ({ center }) => {
   return null;
 };
 
-export const MapComponent: React.FC<MapProps> = ({ bus, currentLocation, wsStatus }) => {
+export const MapComponent: React.FC<MapProps> = ({ bus, currentLocation }) => {
   const mapRef = useRef<any>(null);
   const [realTimeLocation, setRealTimeLocation] = useState<[number, number] | null>(null);
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [locationTimestamp, setLocationTimestamp] = useState<string | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [locationHistory, setLocationHistory] = useState<Array<{lat: number, lng: number, timestamp: string}>>([]);
+  const [placeInfo, setPlaceInfo] = useState<{ city?: string; barangay?: string; country?: string; display?: string }>({});
+  const geocodeTimer = useRef<number | null>(null);
+  const [geoPermission, setGeoPermission] = useState<'granted' | 'prompt' | 'denied' | 'unknown'>('unknown');
+  const permissionCheckedRef = useRef(false);
 
   const center: LatLngExpression = realTimeLocation || currentLocation || 
-    (bus?.current_location ? [bus.current_location.lat, bus.current_location.lng] : [40.7128, -74.0060]);
+    (bus?.current_location ? [bus.current_location.lat, bus.current_location.lng] : [14.6760, 121.0437]);
 
   // Since the API doesn't return full terminal objects, we'll use the IDs for now
   // You might need to fetch terminal details separately or modify your backend
@@ -96,17 +99,108 @@ export const MapComponent: React.FC<MapProps> = ({ bus, currentLocation, wsStatu
         console.log('📍 Current location:', { lat: latitude, lng: longitude, accuracy });
       },
       (error) => {
-        console.error('Location error:', error);
-        alert(`Error getting location: ${error.message}`);
+        console.warn('Location error (suppressed alert):', error);
         setIsTracking(false);
       },
       {
         enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 30000
+        maximumAge: 0
       }
     );
   };
+
+  // Prompt for geolocation permission on mount and attempt one-time fetch to trigger browser prompt
+  useEffect(() => {
+    if (permissionCheckedRef.current) return;
+    permissionCheckedRef.current = true;
+    if (!navigator.geolocation) return;
+    try {
+      // @ts-ignore - Permissions API types vary across browsers
+      if (navigator.permissions && navigator.permissions.query) {
+        // @ts-ignore
+        navigator.permissions.query({ name: 'geolocation' }).then((status: any) => {
+          setGeoPermission(status.state as any);
+          status.onchange = () => setGeoPermission(status.state as any);
+          if (status.state === 'granted') {
+            getCurrentLocation();
+          } else if (status.state === 'prompt') {
+            navigator.geolocation.getCurrentPosition(() => {}, () => {}, {
+              enableHighAccuracy: true,
+              timeout: 8000,
+              maximumAge: 0
+            });
+          }
+        }).catch(() => {
+          navigator.geolocation.getCurrentPosition(() => {}, () => {}, {
+            enableHighAccuracy: true,
+            timeout: 8000,
+            maximumAge: 0
+          });
+        });
+      } else {
+        navigator.geolocation.getCurrentPosition(() => {}, () => {}, {
+          enableHighAccuracy: true,
+          timeout: 8000,
+          maximumAge: 0
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Reverse geocode current coordinates to human-readable place
+  useEffect(() => {
+    const coords: [number, number] | null = realTimeLocation || currentLocation || (bus?.current_location ? [bus.current_location.lat, bus.current_location.lng] : null);
+    if (!coords) return;
+
+    const [lat, lng] = coords;
+
+    if (geocodeTimer.current) {
+      clearTimeout(geocodeTimer.current);
+    }
+
+    geocodeTimer.current = window.setTimeout(async () => {
+      try {
+        const googleKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
+        if (googleKey) {
+          const gUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${googleKey}`;
+          const gRes = await fetch(gUrl);
+          if (gRes.ok) {
+            const gData = await gRes.json();
+            if (gData.status === 'OK' && gData.results?.length) {
+              const comp = gData.results[0].address_components || [];
+              const get = (type: string) => comp.find((c: any) => c.types.includes(type))?.long_name;
+              const barangay = get('sublocality_level_1') || get('neighborhood') || get('sublocality') || get('locality');
+              const city = get('locality') || get('administrative_area_level_2') || get('administrative_area_level_1');
+              const country = get('country');
+              setPlaceInfo({ city, barangay, country, display: gData.results[0].formatted_address });
+              return;
+            }
+          }
+        }
+        // Fallback to Nominatim
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=14&addressdetails=1`;
+        const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const addr = data.address || {};
+        const city = addr.city || addr.town || addr.municipality || addr.state_district || addr.county;
+        const barangay = addr.barangay || addr.suburb || addr.village || addr.neighbourhood || addr.quarter;
+        const country = addr.country || (addr.country_code ? String(addr.country_code).toUpperCase() : undefined);
+        setPlaceInfo({ city, barangay, country, display: data.display_name });
+      } catch (_e) {
+        // ignore geocode errors
+      }
+    }, 800);
+
+    return () => {
+      if (geocodeTimer.current) {
+        clearTimeout(geocodeTimer.current);
+      }
+    };
+  }, [realTimeLocation, currentLocation, bus?.current_location?.lat, bus?.current_location?.lng]);
 
   // Start continuous location tracking
   const startLocationTracking = () => {
@@ -141,7 +235,7 @@ export const MapComponent: React.FC<MapProps> = ({ bus, currentLocation, wsStatu
       {
         enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 30000
+        maximumAge: 0
       }
     );
 
@@ -170,6 +264,22 @@ export const MapComponent: React.FC<MapProps> = ({ bus, currentLocation, wsStatu
       <div class="text-center p-2">
         <h3 class="font-semibold text-gray-900 text-lg mb-2">🚌 Bus ${bus.bus_number}</h3>
         <div class="space-y-2 text-sm">
+          ${placeInfo.city || placeInfo.barangay || placeInfo.country ? `
+            <div class="flex justify-between">
+              <span class="text-gray-600">Area:</span>
+              <span class="font-medium">${[placeInfo.barangay, placeInfo.city, placeInfo.country].filter(Boolean).join(', ')}</span>
+            </div>
+          ` : ''}
+          ${bus.route?.start_terminal_id || bus.route?.name ? `
+            <div class="flex justify-between">
+              <span class="text-gray-600">Start Terminal:</span>
+              <span class="font-medium">${(bus as any).route?.terminal_id || bus.route?.name || 'N/A'}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">End Terminal:</span>
+              <span class="font-medium">${(bus as any).route?.terminal_id || bus.route?.name || 'N/A'}</span>
+            </div>
+          ` : ''}
           <div class="flex justify-between">
             <span class="text-gray-600">Route:</span>
             <span class="font-medium">${bus.route?.name || 'N/A'}</span>
@@ -206,21 +316,7 @@ export const MapComponent: React.FC<MapProps> = ({ bus, currentLocation, wsStatu
 
   return (
     <div className="w-full h-96 rounded-xl overflow-hidden shadow-lg border border-rose-100 relative" style={{ zIndex: 1 }}>
-      {/* Real-time Status Indicator */}
-      {wsStatus && (
-        <div className="absolute top-2 right-2 z-[1000] bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border border-gray-200">
-          <div className="flex items-center space-x-2">
-            <div className={`w-2 h-2 rounded-full ${
-              wsStatus === 'connected' ? 'bg-green-500 animate-pulse' :
-              wsStatus === 'connecting' ? 'bg-blue-500' : 'bg-red-500'
-            }`} />
-            <span className="text-xs font-medium text-gray-700">
-              {wsStatus === 'connected' ? 'Live Tracking' :
-               wsStatus === 'connecting' ? 'Connecting...' : 'Offline'}
-            </span>
-          </div>
-        </div>
-      )}
+      {/* Real-time Status Indicator removed (WebSocket disabled) */}
 
       {/* Location Controls */}
       <div className="absolute top-2 left-2 z-[1000] bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border border-gray-200">
@@ -260,6 +356,12 @@ export const MapComponent: React.FC<MapProps> = ({ bus, currentLocation, wsStatu
               <div>Lng: {realTimeLocation[1].toFixed(6)}</div>
               {locationAccuracy && <div>Accuracy: {locationAccuracy.toFixed(1)}m</div>}
               {locationTimestamp && <div>Time: {locationTimestamp}</div>}
+              {(placeInfo.city || placeInfo.barangay || placeInfo.country) && (
+                <div>Place: {[placeInfo.barangay, placeInfo.city, placeInfo.country].filter(Boolean).join(', ')}</div>
+              )}
+              {placeInfo.display && (
+                <div className="mt-1">Address: {placeInfo.display}</div>
+              )}
             </div>
           </div>
         </div>
