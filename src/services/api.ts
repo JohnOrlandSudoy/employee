@@ -6,7 +6,7 @@ class ApiClient {
 
   constructor() {
     this.client = axios.create({
-      baseURL: import.meta.env.VITE_API_BASE_URL || 'https://backendbus-sumt.onrender.com',
+      baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000',
       headers: {
         'Content-Type': 'application/json',
       },
@@ -60,8 +60,8 @@ class ApiClient {
     return response.data.bus;
   }
 
-  async updateLocation(lat: number, lng: number, employeeId?: string, busId?: string): Promise<void> {
-    await this.client.put('/api/employee/location', { lat, lng, employeeId, busId });
+  async updateLocation(lat: number, lng: number): Promise<void> {
+    await this.client.put('/api/employee/location', { lat, lng });
   }
 
   async updatePassengerCount(busId: string, action: 'add' | 'remove'): Promise<void> {
@@ -75,22 +75,41 @@ class ApiClient {
     return response.data;
   }
 
+  // Map UI types to backend enum (maintenance, violation, delay)
+  private mapReportTypeToServer(type: Report['type']): 'maintenance' | 'violation' | 'delay' {
+    switch (type) {
+      case 'maintenance':
+        return 'maintenance';
+      case 'traffic':
+        return 'delay';
+      case 'passenger':
+        return 'violation';
+      case 'other':
+      default:
+        return 'violation';
+    }
+  }
+
   async submitReport(employeeId: string, busId: string, type: Report['type'], description: string): Promise<void> {
-    const reportData = {
+    const payload = {
       employeeId,
       busId,
-      type,
-      description,
+      type: this.mapReportTypeToServer(type),
+      description: description?.trim(),
     };
     
-    console.log('API: Submitting report with data:', reportData);
+    console.log('API: Submitting report with payload:', payload);
     
     try {
-      const response = await this.client.post('/api/employee/report', reportData);
+      const response = await this.client.post('/api/employee/report', payload);
       console.log('API: Report submitted successfully:', response.data);
     } catch (error: any) {
-      console.log('API: Error response:', error.response?.data);
-      throw error;
+      const serverMsg = error?.response?.data?.error || error?.response?.data?.message;
+      console.log('API: Error response:', error?.response?.status, serverMsg, error?.response?.data);
+      const err = new Error(serverMsg || 'Failed to submit report');
+      // @ts-expect-error attach original
+      err.cause = error;
+      throw err;
     }
   }
 }

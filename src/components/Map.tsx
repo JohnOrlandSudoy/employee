@@ -315,21 +315,21 @@ export const MapComponent: React.FC<MapProps> = ({ bus, currentLocation }) => {
   };
 
   return (
-    <div className="w-full h-96 rounded-xl overflow-hidden shadow-lg border border-rose-100 relative" style={{ zIndex: 1 }}>
+    <div className="w-full h-[60vh] md:h-[70vh] lg:h-[600px] rounded-xl overflow-hidden shadow-lg border border-rose-100 relative" style={{ zIndex: 1 }}>
       {/* Real-time Status Indicator removed (WebSocket disabled) */}
 
       {/* Location Controls */}
-      <div className="absolute top-2 left-2 z-[1000] bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border border-gray-200">
-        <div className="flex flex-col space-y-2">
+      <div className="absolute top-2 left-2 z-[1000] bg-white/95 md:bg-white/90 backdrop-blur-sm rounded-lg px-2 md:px-3 py-2 shadow-lg border border-gray-200 max-w-[90vw] md:max-w-none">
+        <div className="flex flex-row md:flex-col gap-2">
           <button
             onClick={getCurrentLocation}
-            className="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600 transition-colors"
+            className="bg-blue-500 text-white px-3 py-2 md:py-1 rounded text-[11px] md:text-xs hover:bg-blue-600 transition-colors"
           >
             📍 Get Location
           </button>
           <button
             onClick={isTracking ? stopLocationTracking : startLocationTracking}
-            className={`px-3 py-1 rounded text-xs transition-colors ${
+            className={`px-3 py-2 md:py-1 rounded text-[11px] md:text-xs transition-colors ${
               isTracking 
                 ? 'bg-red-500 text-white hover:bg-red-600' 
                 : 'bg-green-500 text-white hover:bg-green-600'
@@ -339,7 +339,7 @@ export const MapComponent: React.FC<MapProps> = ({ bus, currentLocation }) => {
           </button>
           <button
             onClick={clearLocationHistory}
-            className="bg-gray-500 text-white px-3 py-1 rounded text-xs hover:bg-gray-600 transition-colors"
+            className="bg-gray-500 text-white px-3 py-2 md:py-1 rounded text-[11px] md:text-xs hover:bg-gray-600 transition-colors"
           >
             🗑️ Clear
           </button>
@@ -348,19 +348,19 @@ export const MapComponent: React.FC<MapProps> = ({ bus, currentLocation }) => {
 
       {/* Location Info */}
       {realTimeLocation && (
-        <div className="absolute bottom-2 left-2 z-[1000] bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border border-gray-200 max-w-xs">
-          <div className="text-xs space-y-1">
+        <div className="absolute bottom-2 left-2 z-[1000] bg-white/95 md:bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border border-gray-200 max-w-[90vw] md:max-w-xs">
+          <div className="text-[11px] md:text-xs space-y-1">
             <div className="font-semibold text-gray-900">📍 Current Location</div>
-            <div className="text-gray-600">
-              <div>Lat: {realTimeLocation[0].toFixed(6)}</div>
-              <div>Lng: {realTimeLocation[1].toFixed(6)}</div>
-              {locationAccuracy && <div>Accuracy: {locationAccuracy.toFixed(1)}m</div>}
-              {locationTimestamp && <div>Time: {locationTimestamp}</div>}
+            <div className="text-gray-600 grid grid-cols-2 gap-x-3 gap-y-1">
+              <div className="col-span-1">Lat: {realTimeLocation[0].toFixed(6)}</div>
+              <div className="col-span-1">Lng: {realTimeLocation[1].toFixed(6)}</div>
+              {locationAccuracy && <div className="col-span-2">Accuracy: {locationAccuracy.toFixed(1)}m</div>}
+              {locationTimestamp && <div className="col-span-2">Time: {locationTimestamp}</div>}
               {(placeInfo.city || placeInfo.barangay || placeInfo.country) && (
-                <div>Place: {[placeInfo.barangay, placeInfo.city, placeInfo.country].filter(Boolean).join(', ')}</div>
+                <div className="col-span-2">Place: {[placeInfo.barangay, placeInfo.city, placeInfo.country].filter(Boolean).join(', ')}</div>
               )}
               {placeInfo.display && (
-                <div className="mt-1">Address: {placeInfo.display}</div>
+                <div className="col-span-2 mt-1">Address: {placeInfo.display}</div>
               )}
             </div>
           </div>
