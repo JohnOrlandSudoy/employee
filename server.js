@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors({ origin: true, credentials: true }));
@@ -141,7 +141,7 @@ app.put('/api/employee/location', async (req, res) => {
       employeeId: employeeId || null,
       busId: busId || null,
       timestamp: new Date().toISOString(),
-    };
+    };   
 
     if (busId) {
       latestByBusId.set(busId, payload);

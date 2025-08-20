@@ -30,7 +30,7 @@ const terminalIcon = new Icon({
 
 // Current location bus icon (larger and more prominent)
 const currentLocationBusIcon = new Icon({
-  iconUrl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3QgeD0iNSIgeT0iMTAiIHdpZHRoPSIzMCIgaGVpZ2h0PSIyMCIgcng9IjUiIGZpbGw9IiMxMEFBNjQiLz4KPHJlY3QgeD0iOCIgeT0iMTMiIHdpZHRoPSIyNCIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IndoaXRlIi8+CjxjaXJjbGUgY3g9IjEzIiBjeT0iMzMiIHI9IjMiIGZpbGw9IiMzNzQxNTEiLz4KPGNpcmNsZSBjeD0iMjciIGN5PSIzMyIgcj0iMyIgZmlsbD0iIzM3NDE1MSIvPgo8L3N2Zz4K',
+  iconUrl: '/bus-icon.png',
   iconSize: [40, 40],
   iconAnchor: [20, 40],
   popupAnchor: [0, -40],
