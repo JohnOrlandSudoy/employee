@@ -3,16 +3,26 @@ import { Employee, Bus, Notification, Report, LoginResponse, BusResponse } from 
 
 class ApiClient {
   private client: AxiosInstance;
+  private trackingClient: AxiosInstance;
 
   constructor() {
+    // Main backend server for auth, bus data, and reports
     this.client = axios.create({
-      baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000',
+      baseURL: import.meta.env.VITE_BACKEND_URL || 'https://backendbus-sumt.onrender.com',
       headers: {
         'Content-Type': 'application/json',
       },
     });
 
-    // Add auth token to requests
+    // Bus tracking server for real-time location updates
+    this.trackingClient = axios.create({
+      baseURL: import.meta.env.VITE_TRACKING_URL || 'https://employee-server-89en.onrender.com',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    // Add auth token to requests for main backend
     this.client.interceptors.request.use((config) => {
       const token = localStorage.getItem('auth_token');
       if (token) {
@@ -24,8 +34,33 @@ class ApiClient {
       return config;
     });
 
-    // Handle auth errors
+    // Add auth token to requests for tracking server
+    this.trackingClient.interceptors.request.use((config) => {
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+        console.log('Tracking API: Request with token:', token.substring(0, 20) + '...');
+      } else {
+        console.log('Tracking API: No token found');
+      }
+      return config;
+    });
+
+    // Handle auth errors for main backend
     this.client.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401) {
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('employee_data');
+          window.location.href = '/login';
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    // Handle auth errors for tracking server
+    this.trackingClient.interceptors.response.use(
       (response) => response,
       (error) => {
         if (error.response?.status === 401) {
@@ -60,8 +95,15 @@ class ApiClient {
     return response.data.bus;
   }
 
-  async updateLocation(lat: number, lng: number): Promise<void> {
-    await this.client.put('/api/employee/location', { lat, lng });
+  async updateLocation(lat: number, lng: number, employeeId?: string, busId?: string): Promise<void> {
+    const payload: any = { lat, lng };
+    
+    // Add employee and bus info if available
+    if (employeeId) payload.employeeId = employeeId;
+    if (busId) payload.busId = busId;
+    
+    // Use tracking server for location updates
+    await this.trackingClient.put('/api/employee/location', payload);
   }
 
   async updatePassengerCount(busId: string, action: 'add' | 'remove'): Promise<void> {

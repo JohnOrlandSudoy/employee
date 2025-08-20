@@ -1,50 +1,38 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
-import { LatLngExpression, Icon } from 'leaflet';
+import React, { useMemo, useCallback, useEffect, useState } from 'react';
+import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import { LatLngExpression } from 'leaflet';
 import { Bus } from '../types';
+import { useLocationTracking } from '../hooks/useLocationTracking';
+import { LocationControls } from './LocationControls';
+import { LocationInfo } from './LocationInfo';
+import { MapMarkers } from './MapMarkers';
+import { useToast } from './Toast';
+import { useAuth } from '../contexts/AuthContext';
+import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM, MAP_TILE_CONFIG } from '../constants/map';
 import 'leaflet/dist/leaflet.css';
-
-// Fix for default markers in react-leaflet
-delete (Icon.Default.prototype as any)._getIconUrl;
-Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
-
-// Custom bus icon (from public/bus-icon.png)
-const busIcon = new Icon({
-  iconUrl: '/bus-icon.png',
-  iconSize: [40, 40],
-  iconAnchor: [20, 40],
-  popupAnchor: [0, -40],
-});
-
-// Terminal icon
-const terminalIcon = new Icon({
-  iconUrl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiIGZpbGw9IiMxMDU5MkIiLz4KPHN2ZyB4PSI4IiB5PSI4IiB3aWR0aD0iOCIgaGVpZ2h0PSI4IiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiPgo8cGF0aCBkPSJNMTIgMnYyMG0tMTAtOGgxMCIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPC9zdmc+Cjwvc3ZnPgo=',
-  iconSize: [24, 24],
-  iconAnchor: [12, 24],
-  popupAnchor: [0, -24],
-});
-
-// Current location bus icon (larger and more prominent)
-const currentLocationBusIcon = new Icon({
-  iconUrl: '/bus-icon.png',
-  iconSize: [40, 40],
-  iconAnchor: [20, 40],
-  popupAnchor: [0, -40],
-});
 
 interface MapProps {
   bus: Bus | null;
   currentLocation: [number, number] | null;
 }
 
+// Interface for the location update payload
+interface LocationUpdatePayload {
+  busId: string;
+  latest: {
+    lat: number;
+    lng: number;
+    accuracy: number;
+    speed: number;
+    employeeId: string;
+    timestamp: string;
+  };
+}
+
 const MapUpdater: React.FC<{ center: LatLngExpression }> = ({ center }) => {
   const map = useMap();
   
-  useEffect(() => {
+  React.useEffect(() => {
     map.setView(center, map.getZoom());
   }, [map, center]);
 
@@ -52,430 +40,250 @@ const MapUpdater: React.FC<{ center: LatLngExpression }> = ({ center }) => {
 };
 
 export const MapComponent: React.FC<MapProps> = ({ bus, currentLocation }) => {
-  const mapRef = useRef<any>(null);
-  const [realTimeLocation, setRealTimeLocation] = useState<[number, number] | null>(null);
-  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
-  const [locationTimestamp, setLocationTimestamp] = useState<string | null>(null);
-  const [isTracking, setIsTracking] = useState(false);
-  const [locationHistory, setLocationHistory] = useState<Array<{lat: number, lng: number, timestamp: string}>>([]);
-  const [placeInfo, setPlaceInfo] = useState<{ city?: string; barangay?: string; country?: string; display?: string }>({});
-  const geocodeTimer = useRef<number | null>(null);
-  const [geoPermission, setGeoPermission] = useState<'granted' | 'prompt' | 'denied' | 'unknown'>('unknown');
-  const permissionCheckedRef = useRef(false);
+  const { showToast } = useToast();
+  const { employee } = useAuth();
+  const [isSendingUpdate, setIsSendingUpdate] = useState(false);
+  
+  // Use custom hook for location tracking
+  const {
+    realTimeLocation,
+    locationAccuracy,
+    locationTimestamp,
+    isTracking,
+    locationHistory,
+    placeInfo,
+    geoPermission,
+    getCurrentLocation,
+    startLocationTracking,
+    stopLocationTracking,
+    clearLocationHistory,
+  } = useLocationTracking();
 
-  const center: LatLngExpression = realTimeLocation || currentLocation || 
-    (bus?.current_location ? [bus.current_location.lat, bus.current_location.lng] : [14.6760, 121.0437]);
+  // Rate limiting for API calls (max 1 call per 5 seconds)
+  const lastApiCallRef = React.useRef<number>(0);
+  const API_CALL_INTERVAL = 5000; // 5 seconds
 
-  // Since the API doesn't return full terminal objects, we'll use the IDs for now
-  // You might need to fetch terminal details separately or modify your backend
-  const routePath: Array<[number, number]> = [];
-  const startTerminal: any = null; // bus?.route?.start_terminal;
-  const endTerminal: any = null; // bus?.route?.end_terminal;
-
-  // Get current device location
-  const getCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by this browser.');
+  // Function to send location update to API
+  const sendLocationUpdate = useCallback(async (lat: number, lng: number, accuracy: number) => {
+    if (!bus?.id || !employee?.id) {
+      console.warn('Missing bus ID or employee ID for location update');
       return;
     }
 
-    setIsTracking(true);
-    
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude, accuracy } = position.coords;
-        const newLocation: [number, number] = [latitude, longitude];
-        
-        setRealTimeLocation(newLocation);
-        setLocationAccuracy(accuracy);
-        setLocationTimestamp(new Date().toLocaleTimeString());
-        
-        // Add to location history
-        setLocationHistory(prev => [
-          { lat: latitude, lng: longitude, timestamp: new Date().toISOString() },
-          ...prev.slice(0, 9) // Keep last 10 locations
-        ]);
-        
-        console.log('📍 Current location:', { lat: latitude, lng: longitude, accuracy });
-      },
-      (error) => {
-        console.warn('Location error (suppressed alert):', error);
-        setIsTracking(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
-      }
-    );
-  };
-
-  // Prompt for geolocation permission on mount and attempt one-time fetch to trigger browser prompt
-  useEffect(() => {
-    if (permissionCheckedRef.current) return;
-    permissionCheckedRef.current = true;
-    if (!navigator.geolocation) return;
-    try {
-      // @ts-ignore - Permissions API types vary across browsers
-      if (navigator.permissions && navigator.permissions.query) {
-        // @ts-ignore
-        navigator.permissions.query({ name: 'geolocation' }).then((status: any) => {
-          setGeoPermission(status.state as any);
-          status.onchange = () => setGeoPermission(status.state as any);
-          if (status.state === 'granted') {
-            getCurrentLocation();
-          } else if (status.state === 'prompt') {
-            navigator.geolocation.getCurrentPosition(() => {}, () => {}, {
-              enableHighAccuracy: true,
-              timeout: 8000,
-              maximumAge: 0
-            });
-          }
-        }).catch(() => {
-          navigator.geolocation.getCurrentPosition(() => {}, () => {}, {
-            enableHighAccuracy: true,
-            timeout: 8000,
-            maximumAge: 0
-          });
-        });
-      } else {
-        navigator.geolocation.getCurrentPosition(() => {}, () => {}, {
-          enableHighAccuracy: true,
-          timeout: 8000,
-          maximumAge: 0
-        });
-      }
-    } catch {
-      // ignore
+    // Validate location data
+    if (isNaN(lat) || isNaN(lng) || isNaN(accuracy)) {
+      console.warn('Invalid location data:', { lat, lng, accuracy });
+      return;
     }
+
+    // Check if location is within reasonable bounds (Singapore area)
+    if (lat < 1.0 || lat > 1.5 || lng < 103.0 || lng > 104.5) {
+      console.warn('Location out of reasonable bounds:', { lat, lng });
+      return;
+    }
+
+    // Rate limiting check
+    const now = Date.now();
+    if (now - lastApiCallRef.current < API_CALL_INTERVAL) {
+      console.log('📍 API call rate limited, skipping update');
+      return;
+    }
+
+    try {
+      setIsSendingUpdate(true);
+      
+      // Get speed from the latest location data
+      const latestLocation = locationHistory[0];
+      const speed = latestLocation?.speed || 0;
+
+      const payload: LocationUpdatePayload = {
+        busId: bus.id,
+        latest: {
+          lat,
+          lng,
+          accuracy,
+          speed,
+          employeeId: employee.id,
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      console.log('📍 Sending location update:', payload);
+
+      const response = await fetch('https://employee-server-89en.onrender.com/api/admin/location', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('📍 Location update sent successfully:', result);
+      
+      // Update last API call time
+      lastApiCallRef.current = now;
+      
+      // Show success toast for first few updates, then reduce frequency
+      if (locationHistory.length < 3) {
+        showToast('Location update sent to server', 'success');
+      }
+    } catch (error) {
+      console.error('Failed to send location update:', error);
+      const message = error instanceof Error ? error.message : 'Failed to send location update';
+      showToast(message, 'error');
+    } finally {
+      setIsSendingUpdate(false);
+    }
+  }, [bus?.id, employee?.id, locationHistory, showToast]);
+
+  // Send location update whenever real-time location changes
+  useEffect(() => {
+    if (realTimeLocation && locationAccuracy && isTracking && bus?.id && employee?.id) {
+      const [lat, lng] = realTimeLocation;
+      sendLocationUpdate(lat, lng, locationAccuracy);
+    }
+  }, [realTimeLocation, locationAccuracy, isTracking, bus?.id, employee?.id, sendLocationUpdate]);
+
+  // Cleanup effect
+  useEffect(() => {
+    return () => {
+      // Reset sending state on unmount
+      setIsSendingUpdate(false);
+    };
   }, []);
 
-  // Reverse geocode current coordinates to human-readable place
-  useEffect(() => {
-    const coords: [number, number] | null = realTimeLocation || currentLocation || (bus?.current_location ? [bus.current_location.lat, bus.current_location.lng] : null);
-    if (!coords) return;
+  // Memoize map center calculation
+  const center: LatLngExpression = useMemo(() => {
+    return realTimeLocation || currentLocation || 
+      (bus?.current_location ? [bus.current_location.lat, bus.current_location.lng] : DEFAULT_MAP_CENTER);
+  }, [realTimeLocation, currentLocation, bus?.current_location]);
 
-    const [lat, lng] = coords;
-
-    if (geocodeTimer.current) {
-      clearTimeout(geocodeTimer.current);
+  // Memoize location control handlers with error handling
+  const handleGetLocation = useCallback(async () => {
+    try {
+      await getCurrentLocation();
+      showToast('Location obtained successfully!', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to get location';
+      showToast(message, 'error');
     }
+  }, [getCurrentLocation, showToast]);
 
-    geocodeTimer.current = window.setTimeout(async () => {
-      try {
-        const googleKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
-        if (googleKey) {
-          const gUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${googleKey}`;
-          const gRes = await fetch(gUrl);
-          if (gRes.ok) {
-            const gData = await gRes.json();
-            if (gData.status === 'OK' && gData.results?.length) {
-              const comp = gData.results[0].address_components || [];
-              const get = (type: string) => comp.find((c: any) => c.types.includes(type))?.long_name;
-              const barangay = get('sublocality_level_1') || get('neighborhood') || get('sublocality') || get('locality');
-              const city = get('locality') || get('administrative_area_level_2') || get('administrative_area_level_1');
-              const country = get('country');
-              setPlaceInfo({ city, barangay, country, display: gData.results[0].formatted_address });
-              return;
-            }
-          }
-        }
-        // Fallback to Nominatim
-        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=14&addressdetails=1`;
-        const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
-        if (!resp.ok) return;
-        const data = await resp.json();
-        const addr = data.address || {};
-        const city = addr.city || addr.town || addr.municipality || addr.state_district || addr.county;
-        const barangay = addr.barangay || addr.suburb || addr.village || addr.neighbourhood || addr.quarter;
-        const country = addr.country || (addr.country_code ? String(addr.country_code).toUpperCase() : undefined);
-        setPlaceInfo({ city, barangay, country, display: data.display_name });
-      } catch (_e) {
-        // ignore geocode errors
+  const handleToggleTracking = useCallback(async () => {
+    try {
+      if (isTracking) {
+        stopLocationTracking();
+        showToast('Location tracking stopped', 'info');
+      } else {
+        await startLocationTracking();
+        showToast('Location tracking started', 'success');
       }
-    }, 800);
-
-    return () => {
-      if (geocodeTimer.current) {
-        clearTimeout(geocodeTimer.current);
-      }
-    };
-  }, [realTimeLocation, currentLocation, bus?.current_location?.lat, bus?.current_location?.lng]);
-
-  // Start continuous location tracking
-  const startLocationTracking = () => {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by this browser.');
-      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to toggle tracking';
+      showToast(message, 'error');
     }
+  }, [isTracking, startLocationTracking, stopLocationTracking, showToast]);
 
-    setIsTracking(true);
+  const handleClearHistory = useCallback(() => {
+    clearLocationHistory();
+    showToast('Location history cleared', 'info');
+  }, [clearLocationHistory, showToast]);
+
+  // Memoize location info component
+  const locationInfoComponent = useMemo(() => {
+    if (!realTimeLocation) return null;
     
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        const { latitude, longitude, accuracy } = position.coords;
-        const newLocation: [number, number] = [latitude, longitude];
-        
-        setRealTimeLocation(newLocation);
-        setLocationAccuracy(accuracy);
-        setLocationTimestamp(new Date().toLocaleTimeString());
-        
-        // Add to location history
-        setLocationHistory(prev => [
-          { lat: latitude, lng: longitude, timestamp: new Date().toISOString() },
-          ...prev.slice(0, 9) // Keep last 10 locations
-        ]);
-        
-        console.log('📍 Location update:', { lat: latitude, lng: longitude, accuracy });
-      },
-      (error) => {
-        console.error('Location tracking error:', error);
-        setIsTracking(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
-      }
+    return (
+      <LocationInfo
+        realTimeLocation={realTimeLocation}
+        locationAccuracy={locationAccuracy}
+        locationTimestamp={locationTimestamp}
+        placeInfo={placeInfo}
+      />
     );
+  }, [realTimeLocation, locationAccuracy, locationTimestamp, placeInfo]);
 
-    // Store watch ID for cleanup
-    return () => navigator.geolocation.clearWatch(watchId);
-  };
+  // Memoize location controls component
+  const locationControlsComponent = useMemo(() => (
+    <LocationControls
+      isTracking={isTracking}
+      onGetLocation={handleGetLocation}
+      onToggleTracking={handleToggleTracking}
+      onClearHistory={handleClearHistory}
+    />
+  ), [isTracking, handleGetLocation, handleToggleTracking, handleClearHistory]);
 
-  // Stop location tracking
-  const stopLocationTracking = () => {
-    setIsTracking(false);
-    setRealTimeLocation(null);
-    setLocationAccuracy(null);
-    setLocationTimestamp(null);
-  };
-
-  // Clear location history
-  const clearLocationHistory = () => {
-    setLocationHistory([]);
-  };
-
-  // Create enhanced popup content for bus location
-  const createBusPopupContent = () => {
-    if (!bus) return 'No bus information available';
-    
-    return `
-      <div class="text-center p-2">
-        <h3 class="font-semibold text-gray-900 text-lg mb-2">🚌 Bus ${bus.bus_number}</h3>
-        <div class="space-y-2 text-sm">
-          ${placeInfo.city || placeInfo.barangay || placeInfo.country ? `
-            <div class="flex justify-between">
-              <span class="text-gray-600">Area:</span>
-              <span class="font-medium">${[placeInfo.barangay, placeInfo.city, placeInfo.country].filter(Boolean).join(', ')}</span>
-            </div>
-          ` : ''}
-          ${bus.route?.start_terminal_id || bus.route?.name ? `
-            <div class="flex justify-between">
-              <span class="text-gray-600">Start Terminal:</span>
-              <span class="font-medium">${(bus as any).route?.terminal_id || bus.route?.name || 'N/A'}</span>
-            </div>
-            <div class="flex justify-between">
-              <span class="text-gray-600">End Terminal:</span>
-              <span class="font-medium">${(bus as any).route?.terminal_id || bus.route?.name || 'N/A'}</span>
-            </div>
-          ` : ''}
-          <div class="flex justify-between">
-            <span class="text-gray-600">Route:</span>
-            <span class="font-medium">${bus.route?.name || 'N/A'}</span>
-          </div>
-          <div class="flex justify-between">
-            <span class="text-gray-600">Status:</span>
-            <span class="font-medium text-green-600">${bus.status || 'N/A'}</span>
-          </div>
-          <div class="flex justify-between">
-            <span class="text-gray-600">Total Seats:</span>
-            <span class="font-medium">${bus.total_seats || 0}</span>
-          </div>
-          <div class="flex justify-between">
-            <span class="text-gray-600">Available:</span>
-            <span class="font-medium text-blue-600">${bus.available_seats || 0}</span>
-          </div>
-          <div class="flex justify-between">
-            <span class="text-gray-600">Passengers:</span>
-            <span class="font-medium text-orange-600">${(bus.total_seats || 0) - (bus.available_seats || 0)}</span>
-          </div>
-          ${realTimeLocation ? `
-            <div class="mt-3 pt-2 border-t border-gray-200">
-              <div class="text-xs text-gray-500">📍 Real-time GPS Location</div>
-              <div class="text-xs text-gray-600">Lat: ${realTimeLocation[0].toFixed(6)}</div>
-              <div class="text-xs text-gray-600">Lng: ${realTimeLocation[1].toFixed(6)}</div>
-              ${locationAccuracy ? `<div class="text-xs text-gray-600">Accuracy: ${locationAccuracy.toFixed(1)}m</div>` : ''}
-              ${locationTimestamp ? `<div class="text-xs text-gray-600">Updated: ${locationTimestamp}</div>` : ''}
-            </div>
-          ` : ''}
-        </div>
-      </div>
-    `;
-  };
+  // Memoize map markers component
+  const mapMarkersComponent = useMemo(() => (
+    <MapMarkers
+      bus={bus}
+      currentLocation={currentLocation}
+      realTimeLocation={realTimeLocation}
+      locationAccuracy={locationAccuracy}
+      locationTimestamp={locationTimestamp}
+      placeInfo={placeInfo}
+      locationHistory={locationHistory}
+    />
+  ), [
+    bus,
+    currentLocation,
+    realTimeLocation,
+    locationAccuracy,
+    locationTimestamp,
+    placeInfo,
+    locationHistory
+  ]);
 
   return (
     <div className="w-full h-[60vh] md:h-[70vh] lg:h-[600px] rounded-xl overflow-hidden shadow-lg border border-rose-100 relative" style={{ zIndex: 1 }}>
-      {/* Real-time Status Indicator removed (WebSocket disabled) */}
-
-      {/* Location Controls */}
-      <div className="absolute top-2 left-2 z-[1000] bg-white/95 md:bg-white/90 backdrop-blur-sm rounded-lg px-2 md:px-3 py-2 shadow-lg border border-gray-200 max-w-[90vw] md:max-w-none">
-        <div className="flex flex-row md:flex-col gap-2">
-          <button
-            onClick={getCurrentLocation}
-            className="bg-blue-500 text-white px-3 py-2 md:py-1 rounded text-[11px] md:text-xs hover:bg-blue-600 transition-colors"
-          >
-            📍 Get Location
-          </button>
-          <button
-            onClick={isTracking ? stopLocationTracking : startLocationTracking}
-            className={`px-3 py-2 md:py-1 rounded text-[11px] md:text-xs transition-colors ${
-              isTracking 
-                ? 'bg-red-500 text-white hover:bg-red-600' 
-                : 'bg-green-500 text-white hover:bg-green-600'
-            }`}
-          >
-            {isTracking ? '⏹️ Stop' : '▶️ Track'}
-          </button>
-          <button
-            onClick={clearLocationHistory}
-            className="bg-gray-500 text-white px-3 py-2 md:py-1 rounded text-[11px] md:text-xs hover:bg-gray-600 transition-colors"
-          >
-            🗑️ Clear
-          </button>
+      {/* Status Indicator */}
+      <div className="absolute top-2 left-2 z-10 bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow-md border border-gray-200">
+        <div className="flex items-center space-x-2 text-sm">
+          <div className={`w-2 h-2 rounded-full ${isTracking ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+          <span className="font-medium">
+            {isTracking ? 'Tracking Active' : 'Tracking Inactive'}
+          </span>
+          {isSendingUpdate && (
+            <div className="flex items-center space-x-1 text-blue-600">
+              <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              <span>Sending...</span>
+            </div>
+          )}
         </div>
+        {isTracking && realTimeLocation && (
+          <div className="text-xs text-gray-600 mt-1">
+            Last update: {new Date().toLocaleTimeString()}
+          </div>
+        )}
       </div>
 
+      {/* Location Controls */}
+      {locationControlsComponent}
+
       {/* Location Info */}
-      {realTimeLocation && (
-        <div className="absolute bottom-2 left-2 z-[1000] bg-white/95 md:bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border border-gray-200 max-w-[90vw] md:max-w-xs">
-          <div className="text-[11px] md:text-xs space-y-1">
-            <div className="font-semibold text-gray-900">📍 Current Location</div>
-            <div className="text-gray-600 grid grid-cols-2 gap-x-3 gap-y-1">
-              <div className="col-span-1">Lat: {realTimeLocation[0].toFixed(6)}</div>
-              <div className="col-span-1">Lng: {realTimeLocation[1].toFixed(6)}</div>
-              {locationAccuracy && <div className="col-span-2">Accuracy: {locationAccuracy.toFixed(1)}m</div>}
-              {locationTimestamp && <div className="col-span-2">Time: {locationTimestamp}</div>}
-              {(placeInfo.city || placeInfo.barangay || placeInfo.country) && (
-                <div className="col-span-2">Place: {[placeInfo.barangay, placeInfo.city, placeInfo.country].filter(Boolean).join(', ')}</div>
-              )}
-              {placeInfo.display && (
-                <div className="col-span-2 mt-1">Address: {placeInfo.display}</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {locationInfoComponent}
       
       <MapContainer
         center={center}
-        zoom={13}
+        zoom={DEFAULT_MAP_ZOOM}
         className="w-full h-full"
-        ref={mapRef}
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution={MAP_TILE_CONFIG.attribution}
+          url={MAP_TILE_CONFIG.url}
         />
 
         <MapUpdater center={center} />
 
-        {/* Route polyline */}
-        {routePath.length > 0 && (
-          <Polyline
-            positions={routePath}
-            color="#F43F5E"
-            weight={4}
-            opacity={0.7}
-          />
-        )}
-
-        {/* Start terminal */}
-        {startTerminal && (
-          <Marker
-            position={[startTerminal.location.lat, startTerminal.location.lng]}
-            icon={terminalIcon}
-          >
-            <Popup>
-              <div className="text-center">
-                <h3 className="font-semibold text-gray-900">{startTerminal.name}</h3>
-                <p className="text-sm text-gray-600">Start Terminal</p>
-              </div>
-            </Popup>
-          </Marker>
-        )}
-
-        {/* End terminal */}
-        {endTerminal && (
-          <Marker
-            position={[endTerminal.location.lat, endTerminal.location.lng]}
-            icon={terminalIcon}
-          >
-            <Popup>
-              <div className="text-center">
-                <h3 className="font-semibold text-gray-900">{endTerminal.name}</h3>
-                <p className="text-sm text-gray-600">End Terminal</p>
-              </div>
-            </Popup>
-          </Marker>
-        )}
-
-        {/* Real-time device location with BUS ICON (highest priority) */}
-        {realTimeLocation && (
-          <Marker 
-            position={realTimeLocation} 
-            icon={currentLocationBusIcon}
-          >
-            <Popup>
-              <div dangerouslySetInnerHTML={{ __html: createBusPopupContent() }} />
-            </Popup>
-          </Marker>
-        )}
-
-        {/* Bus location from API (fallback when no real-time location) */}
-        {(currentLocation || bus?.current_location) && !realTimeLocation && (
-          <Marker 
-            position={currentLocation || [bus!.current_location!.lat, bus!.current_location!.lng]} 
-            icon={busIcon}
-          >
-            <Popup>
-              <div dangerouslySetInnerHTML={{ __html: createBusPopupContent() }} />
-            </Popup>
-          </Marker>
-        )}
-
-        {/* Location history trail */}
-        {locationHistory.length > 1 && (
-          <Polyline
-            positions={locationHistory.map(loc => [loc.lat, loc.lng])}
-            color="#10AA64"
-            weight={3}
-            opacity={0.6}
-            dashArray="5, 5"
-          />
-        )}
-
-        {/* Location history markers */}
-        {locationHistory.slice(1).map((location, index) => (
-          <Marker
-            key={location.timestamp}
-            position={[location.lat, location.lng]}
-            icon={new Icon({
-              iconUrl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIHZpZXdCb3g9IjAgMCAxMiAxMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iNiIgY3k9IjYiIHI9IjQiIGZpbGw9IiMxMEFBNjQiIG9wYWNpdHk9IjAuNiIvPgo8L3N2Zz4K',
-              iconSize: [12, 12],
-              iconAnchor: [6, 6],
-            })}
-          >
-            <Popup>
-              <div className="text-center">
-                <h3 className="font-semibold text-gray-900 text-xs">📍 Location {locationHistory.length - index}</h3>
-                <p className="text-xs text-gray-600">
-                  {new Date(location.timestamp).toLocaleTimeString()}
-                </p>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+        {/* Map Markers */}
+        {mapMarkersComponent}
       </MapContainer>
     </div>
   );
