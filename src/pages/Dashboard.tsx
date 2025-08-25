@@ -191,11 +191,11 @@ export const Dashboard: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
-              <div className="h-8 w-8 bg-rose-500 rounded-full flex items-center justify-center">
-                <Bus className="h-5 w-5 text-white" />
+              <div className="h-8 w-8 flex items-center justify-center">
+                <img src="/bus-icon.png" alt="Auro Ride Logo" className="h-8 w-8" />
               </div>
               <div>
-                <h1 className="text-lg font-semibold text-gray-900">Bus Tracking</h1>
+                <h1 className="text-lg font-semibold text-gray-900">Auro Ride</h1>
                 <p className="text-sm text-gray-600">Welcome, {employee?.profile?.fullName || employee?.username}</p>
               </div>
             </div>
